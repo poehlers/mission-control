@@ -42,12 +42,13 @@ def main(argv):
     log_path = db.LOGS / f"{run_id}.log"
     shell = len(cmd) == 1
     env = {**os.environ, "PYTHONUNBUFFERED": "1"}  # otherwise piped Python children block-buffer for minutes
+    # Like nohup: an ignored SIGHUP is inherited by the child, so closing the terminal doesn't kill the job.
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
     p = subprocess.Popen(cmd[0] if shell else cmd, shell=shell, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, env=env, cwd=os.getcwd())
     # Ctrl-C reaches the child via the terminal's process group; we stay alive to record its exit.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, lambda *_: p.terminate())
-    signal.signal(signal.SIGHUP, lambda *_: None)  # closing the terminal shouldn't orphan the registry row
 
     con = db.connect()
     cmd_str = cmd[0] if shell else subprocess.list2cmdline(cmd)

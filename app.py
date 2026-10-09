@@ -205,6 +205,12 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 
 
+@app.get("/api/runs")
+async def runs_json():
+    """One-shot JSON of the run registry + source health, for scripts and agents (the UI uses /api/stream)."""
+    return runs_payload()
+
+
 def topic_history(topic):
     if topic == "runs":
         return [runs_payload()]
