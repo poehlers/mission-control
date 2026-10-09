@@ -18,19 +18,43 @@ let cleanups = [];
 const every = (ms, fn) => { const t = setInterval(fn, ms); cleanups.push(() => clearInterval(t)); };
 function stream(url, onmsg) { const es = new EventSource(url); es.onmessage = e => onmsg(JSON.parse(e.data)); cleanups.push(() => es.close()); return es; }
 
+// Hub topics (runs, local, box:<id>) share ONE EventSource: browsers allow only 6 connections per host.
+// fn(items, reset): reset=true delivers the topic's history and replaces whatever the view had.
+const bus = {handlers: new Map(), es: null, timer: 0};
+function busOpen() {
+  clearTimeout(bus.timer);
+  bus.timer = setTimeout(() => {
+    bus.es?.close();
+    const ts = [...bus.handlers.keys()];
+    bus.es = ts.length ? new EventSource("/api/stream?" + ts.map(t => "t=" + encodeURIComponent(t)).join("&")) : null;
+    if (bus.es) bus.es.onmessage = e => { const m = JSON.parse(e.data); bus.handlers.get(m.topic)?.forEach(f => f(m.items, m.reset)); };
+  }, 30);  // batch the subscribe/unsubscribe burst of a navigation into one reconnect
+}
+function sub(topic, fn, permanent) {
+  if (!bus.handlers.has(topic)) { bus.handlers.set(topic, new Set()); busOpen(); }
+  bus.handlers.get(topic).add(fn);
+  if (!permanent) cleanups.push(() => { const h = bus.handlers.get(topic); h.delete(fn); if (!h.size) { bus.handlers.delete(topic); busOpen(); } });
+}
+// History-keeping subscription: hist is reset on (re)connect, capped at max.
+function subHist(topic, max, draw) {
+  const hist = [];
+  sub(topic, (items, reset) => { if (reset) hist.length = 0; hist.push(...items); hist.splice(0, Math.max(0, hist.length - max)); draw(hist); });
+  return hist;
+}
+
 // One app-wide runs stream: feeds the header burn pill and every view that lists runs.
 let RUNS = null;
 const runsSubs = new Set();
 function onRuns(fn) { runsSubs.add(fn); cleanups.push(() => runsSubs.delete(fn)); if (RUNS) fn(RUNS); }
-new EventSource("/api/runs/stream").onmessage = e => { RUNS = JSON.parse(e.data); burnPill(); runsSubs.forEach(f => f(RUNS)); };
+sub("runs", items => { RUNS = items[items.length - 1]; burnPill(); runsSubs.forEach(f => f(RUNS)); }, true);
 const liveVast = () => (RUNS?.runs || []).filter(r => r.source === "vast" && r.status === "running");
 const gpuIdle = r => r.meta?.gpu_util != null && r.meta.gpu_util < 5;
 function burnPill() {
   const v = liveVast(), el = $("#burn"), err = RUNS.sources?.vast && !RUNS.sources.vast.ok;
   el.hidden = !v.length && !err;
   const idle = v.filter(gpuIdle).length;
-  el.innerHTML = err ? `⚠ Vast poll failing` : `● ${v.length} Vast box${v.length > 1 ? "es" : ""} · ${money(v.reduce((a, r) => a + r.dph, 0))}/h` + (idle ? ` · ${idle} GPU idle` : "");
-  el.title = err ? RUNS.sources.vast.error : "Running Vast instances bill by the hour, idle or not";
+  el.innerHTML = err ? `⚠ Vast poll failing` : `● ${v.length} Vast box${v.length > 1 ? "es" : ""} · ${money(v.reduce((a, r) => a + r.dph, 0))}/h` + (idle ? ` · ${idle} at GPU 0%` : "");
+  el.title = err ? RUNS.sources.vast.error : "Running Vast instances bill by the hour whether or not the GPU is used";
 }
 
 // ---------- Devices (Mac) ----------
@@ -68,13 +92,12 @@ function viewDevices(el) {
       boxStream(d, r.meta.id, `<a href="#/run/${r.id}">Vast ${r.meta.id}</a> <span class="muted">${esc(r.device)} · ${money(r.dph)}/h</span>`);
     }
   });
-  const hist = [];
-  stream("/api/local/stream", s => { hist.push(s); if (hist.length > 90) hist.shift(); $("#mac").innerHTML = macCard(hist); });
+  subHist("local", 90, hist => { $("#mac").innerHTML = macCard(hist); });
 }
 
 function viewProcesses(el) {
   el.innerHTML = `<h2>Processes <span class="muted">heaviest local processes, tracked or not (2 s)</span></h2><div id="procs" class="muted">loading…</div>`;
-  stream("/api/local/stream", s => { $("#procs").innerHTML = procTable(s.procs); });
+  sub("local", items => { if (items.length) $("#procs").innerHTML = procTable(items[items.length - 1].procs); });
 }
 
 // ---------- Runs ----------
@@ -89,7 +112,7 @@ const filt = JSON.parse(localStorage.getItem("mc.filter") || "{}");
 function runsTable(rs) {
   return `<table class="grid"><thead><tr><th>Status</th><th>Run</th><th>Source</th><th>Project</th><th>Device</th><th>Started</th><th>Duration</th><th>Cost</th></tr></thead><tbody>
   ${rs.map(r => `<tr class="${r.source === "vast" && r.status === "running" ? "burning" : ""}"><td>${badge(r.status)}</td><td><a href="#/run/${encodeURIComponent(r.id)}">${esc(r.name)}</a></td><td>${esc(r.source)}</td><td>${esc(r.project || "")}</td>
-  <td>${esc(r.device || "")}${r.source === "vast" && r.status === "running" && r.meta.gpu_util != null ? ` <span class="${gpuIdle(r) ? "idle" : "muted"}">GPU ${pct(r.meta.gpu_util)}${gpuIdle(r) ? " idle" : ""}</span>` : ""}</td><td>${fmtT(r.started)}</td><td>${dur(r)}</td><td>${r.cost != null ? money(r.cost) + (r.dph ? ` <span class="muted">@${money(r.dph)}/h</span>` : "") : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No runs.</td></tr>`}</tbody></table>`;
+  <td>${esc(r.device || "")}${r.source === "vast" && r.status === "running" && r.meta.gpu_util != null ? ` <span class="${gpuIdle(r) ? "idle" : "muted"}">GPU ${pct(r.meta.gpu_util)}</span>` : ""}</td><td>${fmtT(r.started)}</td><td>${dur(r)}</td><td>${r.cost != null ? money(r.cost) + (r.dph ? ` <span class="muted">@${money(r.dph)}/h</span>` : "") : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No runs.</td></tr>`}</tbody></table>`;
 }
 
 function viewRuns(el) {
@@ -165,7 +188,7 @@ function kaggleHead(r, first) {
 function vastHead(r, first) {
   const m = r.meta, iid = m.id, running = r.status === "running";
   $("#rhead").innerHTML = `<h2>${esc(r.name)} ${badge(r.status)} <span class="muted">vast · ${esc(r.device)}</span></h2>
-    ${running && gpuIdle(r) ? `<div class="warnbox">GPU idle (${pct(m.gpu_util)} per Vast) but billing ${money(r.dph)}/h.</div>` : ""}
+    ${running && gpuIdle(r) ? `<div class="warnbox">GPU at ${pct(m.gpu_util)} (per Vast) while billing ${money(r.dph)}/h. Fine if the job is CPU-bound; otherwise the box is paying for nothing.</div>` : ""}
     <table class="kv"><tr><td>$/h</td><td class="money">${money(r.dph)}${running ? "" : " (storage)"}</td><td>Accrued ≈</td><td>${money(r.cost)}</td></tr>
     <tr><td>Started</td><td>${fmtT(r.started)}</td><td>Uptime</td><td>${dur(r)}</td></tr>
     <tr><td>Where</td><td>${esc(m.geolocation)}</td><td>Image</td><td><code>${esc(m.image_uuid)}</code></td></tr>
@@ -188,7 +211,7 @@ function boxCard(hist, title) {
   const err = last?.error ? `<p class="bad small">ssh: ${esc(last.error)}</p>` : "";
   if (!s) return `<div class="card"><h3>${title}</h3>${err || `<p class="muted">connecting over ssh…</p>`}</div>`;
   const idle = ok.length >= 6 && ok.slice(-6).every(x => x.gpus.every(g => (g.util ?? 0) < 5));
-  return `<div class="card ${idle ? "idlecard" : ""}"><h3>${title} ${idle ? `<span class="idle">GPU idle for 30 s+</span>` : ""}</h3>${err}
+  return `<div class="card ${idle ? "idlecard" : ""}"><h3>${title} ${idle ? `<span class="idle">GPU 0% for 30 s+</span>` : ""}</h3>${err}
   ${s.gpus.map(g => `<div class="metrics">
     <div><label>GPU${g.index} util ${pct(g.util)} <span class="muted">${esc(g.name.replace("NVIDIA GeForce ", ""))}</span></label>${spark(ok.map(x => x.gpus[g.index]?.util ?? 0))}</div>
     <div><label>VRAM ${fmtB(g.mem_used * 2 ** 20)}/${fmtB(g.mem_total * 2 ** 20)}</label>${spark(ok.map(x => { const q = x.gpus[g.index]; return q ? 100 * q.mem_used / q.mem_total : 0; }))}</div>
@@ -201,9 +224,8 @@ function boxCard(hist, title) {
 }
 
 function boxStream(el, iid, title) {
-  const hist = [];
-  el.innerHTML = boxCard(hist, title);
-  stream(`/api/vast/${iid}/stream`, s => { hist.push(s); if (hist.length > 60) hist.shift(); el.innerHTML = boxCard(hist, title); });
+  el.innerHTML = boxCard([], title);
+  subHist(`box:${iid}`, 60, hist => { el.innerHTML = boxCard(hist, title); });
 }
 
 // ---------- Projects ----------
@@ -287,6 +309,41 @@ async function showRoadmap(el, p) {
     <p class="muted small">Source: <a href="${fileUrl(p.id, r.path)}" target="_blank">${esc(r.path)}</a> (re-read live on change)</p>`;
 }
 
+// ---------- Overview ----------
+const seenKey = "mc.lastSeen";
+const lastSeen = () => { try { return +localStorage.getItem(seenKey) || Date.now() / 1000 - 86400; } catch { return Date.now() / 1000 - 86400; } };
+
+function viewOverview(el) {
+  el.innerHTML = `<div id="ovburn"></div><div class="ovgrid"><div><h3>Running now</h3><div id="ovlive"></div>
+    <h3 class="gap">Finished since you last looked <span class="muted small" id="ovseen"></span> <button id="markseen">Mark seen</button></h3><div id="ovnew"></div></div>
+    <div><h3>Now, per project</h3><div id="ovnow" class="muted">loading…</div><div id="ovsrc"></div></div></div>`;
+  $("#markseen").onclick = () => { try { localStorage.setItem(seenKey, Date.now() / 1000); } catch {} draw(); };
+  const draw = () => {
+    if (!RUNS) return;
+    const rs = RUNS.runs, v = liveVast(), since = lastSeen();
+    const burn = v.reduce((a, r) => a + r.dph, 0), accrued = v.reduce((a, r) => a + (r.cost || 0), 0);
+    $("#ovburn").innerHTML = v.length ? `<div class="card burncard"><h2>${v.length} Vast box${v.length > 1 ? "es" : ""} running · <span class="money">${money(burn)}/h</span> <span class="muted">· ≈${money(accrued)} accrued · ≈${money(burn * 24)}/day if left on</span></h2>
+      <table class="grid">${v.map(r => `<tr><td><a href="#/run/${r.id}">${esc(r.name)}</a></td><td>${esc(r.device)}</td><td class="money">${money(r.dph)}/h</td><td>up ${dur(r)}</td>
+      <td class="${gpuIdle(r) ? "idle" : ""}">GPU ${pct(r.meta.gpu_util)}</td><td class="muted">${esc(r.meta.geolocation || "")}</td></tr>`).join("")}</table>
+      <p class="muted small">Billing runs while the box exists, GPU busy or not. Stop/destroy stays manual for now.</p></div>`
+      : `<div class="card"><h3>No Vast boxes running <span class="muted">· $0/h</span></h3></div>`;
+    const live = rs.filter(r => LIVE.includes(r.status) && r.source !== "vast");
+    $("#ovlive").innerHTML = live.length ? runsTable(live) : `<p class="muted">Nothing running locally or on Kaggle.</p>`;
+    const fresh = rs.filter(r => r.ended && r.ended > since && !LIVE.includes(r.status)).sort((a, b) => b.ended - a.ended);
+    $("#ovseen").textContent = `(since ${fmtT(since)})`;
+    $("#ovnew").innerHTML = fresh.length ? runsTable(fresh) : `<p class="muted">Nothing new.</p>`;
+    const bad = Object.entries(RUNS.sources || {}).filter(([, x]) => !x.ok);
+    $("#ovsrc").innerHTML = bad.map(([k, x]) => `<p class="bad small">${esc(k)} poll failing: ${esc(x.error)}</p>`).join("");
+  };
+  onRuns(draw);
+  every(5000, draw);
+  projReady.then(() => Promise.all(PROJECTS.map(p => fetch(`/api/projects/${p.id}/roadmap`).then(r => r.json()).then(r => [p, r])))).then(prs => {
+    $("#ovnow").classList.remove("muted");
+    $("#ovnow").innerHTML = prs.map(([p, r]) => `<div class="card"><h3><a href="#/project/${p.id}/roadmap">${esc(p.name)}</a></h3>
+      ${!r.exists ? `<p class="muted small">No roadmap file yet.</p>` : `<ul class="items">${r.columns.Now.map(roadmapItem).join("") || `<li class="muted">Nothing in Now.</li>`}</ul>`}</div>`).join("");
+  });
+}
+
 // ---------- Router ----------
 const routes = [
   [/^#\/runs$/, viewRuns],
@@ -294,7 +351,7 @@ const routes = [
   [/^#\/devices$/, viewDevices],
   [/^#\/project\/([\w-]+)(?:\/(doc|arch|roadmap)(?:\/(.+))?)?$/, viewProject],
   [/^#\/processes$/, viewProcesses],
-  [/^#?\/?$/, viewDevices],  // overview lands in slice (g)
+  [/^#?\/?$/, viewOverview],
 ];
 function route() {
   cleanups.forEach(f => f()); cleanups = [];

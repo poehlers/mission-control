@@ -86,3 +86,8 @@ iframe.arch { width: 100%; height: calc(100vh - 170px); border: 1px solid var(--
 .items li.done > div { color: var(--muted); }
 .chk { color: var(--muted); } .items li.done .chk { color: var(--ok); }
 .date { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; white-space: nowrap; }
+.burncard { border-color: var(--money); background: color-mix(in srgb, var(--money) 8%, var(--panel)); }
+.ovgrid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .ovgrid { grid-template-columns: 1fr; } }
+h3.gap { margin-top: 22px; }
+h3 button { font-size: 12px; padding: 2px 8px; margin-left: 6px; }

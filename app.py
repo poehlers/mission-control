@@ -10,7 +10,7 @@ from pathlib import Path
 
 import psutil
 import yaml
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,7 +31,7 @@ class Hub:
 
     def publish(self, topic, data):
         for q in self.subs[topic]:
-            q.put_nowait(data)
+            q.put_nowait((topic, data))
 
     def watched(self, topic):
         return bool(self.subs[topic])
@@ -74,28 +74,6 @@ async def follow_file(path, n=500):
                 *lines, rest = (rest + new).split(b"\n")
                 if lines:
                     yield clean(lines)
-
-
-def sse(topic, request: Request, initial=()):
-    async def gen():
-        q = asyncio.Queue()
-        hub.subs[topic].add(q)
-        try:
-            for item in initial:
-                yield f"data: {json.dumps(item)}\n\n"
-            while True:
-                try:
-                    item = await asyncio.wait_for(q.get(), 15)
-                    yield f"data: {json.dumps(item)}\n\n"
-                except TimeoutError:
-                    yield ": ping\n\n"
-                if await request.is_disconnected():
-                    break
-        finally:
-            hub.subs[topic].discard(q)
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 async def local_loop():
@@ -226,14 +204,43 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/api/local/stream")
-async def local_stream(request: Request):
-    return sse("local", request, list(local_hist))
+def topic_history(topic):
+    if topic == "runs":
+        return [runs_payload()]
+    if topic == "local":
+        return list(local_hist)
+    iid = int(topic.removeprefix("box:"))
+    return list(box_hist[iid]) if iid in box_hist else []
 
 
-@app.get("/api/runs/stream")
-async def runs_stream(request: Request):
-    return sse("runs", request, [runs_payload()])
+TOPIC = re.compile(r"^(runs|local|box:\d+)$")
+
+
+@app.get("/api/stream")
+async def stream(t: list[str] = Query([])):
+    """All hub topics a page needs over ONE connection (browsers allow only 6 per host over HTTP/1.1).
+    Messages: {"topic", "items", "reset"}; reset=True carries the topic's history and replaces what the page had."""
+    topics = sorted(set(t))
+    if not topics or not all(TOPIC.match(x) for x in topics):
+        raise HTTPException(400, "topics: runs, local, box:<id>")
+
+    async def gen():
+        q = asyncio.Queue()
+        for x in topics:
+            hub.subs[x].add(q)
+        try:
+            for x in topics:
+                yield f"data: {json.dumps({'topic': x, 'items': topic_history(x), 'reset': True})}\n\n"
+            while True:
+                try:
+                    x, item = await asyncio.wait_for(q.get(), 15)
+                    yield f"data: {json.dumps({'topic': x, 'items': [item], 'reset': False})}\n\n"
+                except TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            for x in topics:
+                hub.subs[x].discard(q)
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 def get_run(run_id):
@@ -292,10 +299,6 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
         raise HTTPException(404, "no log for this run (yet)")
     return sse_iter(follow_file(r["log"], n))
 
-
-@app.get("/api/vast/{iid}/stream")
-async def box_stream(iid: int, request: Request):
-    return sse(f"box:{iid}", request, list(box_hist[iid]) if iid in box_hist else [])
 
 
 # ---------- Projects (read-only toward each repo) ----------
