@@ -1,0 +1,69 @@
+[
+ {
+  "id": 55015585,
+  "actual_status": "running",
+  "intended_status": "running",
+  "cur_state": "running",
+  "gpu_name": "RTX 3090",
+  "num_gpus": 1,
+  "gpu_ram": 24576,
+  "gpu_util": 0.0,
+  "gpu_temp": 49.999954,
+  "cpu_util": 3.11875,
+  "cpu_cores_effective": 32.0,
+  "mem_usage": 19.6608,
+  "mem_limit": 94.87515648,
+  "disk_usage": 39.0,
+  "disk_space": 100.0,
+  "dph_total": 0.3757684444444444,
+  "storage_total_cost": 0.027777777777777776,
+  "start_date": 1791546831.2024658,
+  "label": null,
+  "geolocation": "Oklahoma, US",
+  "image_uuid": "pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime",
+  "status_msg": "success, running pytorch/pytorch_2.7.1-cuda12.8-cudnn9-runtime/ssh",
+  "ssh_host": "ssh6.vast.ai",
+  "ssh_port": 20370,
+  "public_ipaddr": "203.0.113.7",
+  "ports": {
+   "22/tcp": [
+    {
+     "HostIp": "0.0.0.0",
+     "HostPort": "40708"
+    },
+    {
+     "HostIp": "::",
+     "HostPort": "40708"
+    }
+   ]
+  }
+ },
+ {
+  "id": 55015591,
+  "actual_status": "exited",
+  "intended_status": "running",
+  "cur_state": "running",
+  "gpu_name": "RTX 3090",
+  "num_gpus": 1,
+  "gpu_ram": 24576,
+  "gpu_util": 0.0,
+  "gpu_temp": 26.999975,
+  "cpu_util": 3.1246875,
+  "cpu_cores_effective": 32.0,
+  "mem_usage": 8.597274624,
+  "mem_limit": 253.231104,
+  "disk_usage": 39.0,
+  "disk_space": 100.0,
+  "dph_total": 0.41851851851851846,
+  "storage_total_cost": 0.018518518518518514,
+  "start_date": 1791546832.2553446,
+  "label": null,
+  "geolocation": "Ohio, US",
+  "image_uuid": "pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime",
+  "status_msg": "success, running pytorch/pytorch_2.7.1-cuda12.8-cudnn9-runtime/ssh",
+  "ssh_host": "ssh5.vast.ai",
+  "ssh_port": 29502,
+  "public_ipaddr": "203.0.113.7",
+  "ports": {}
+ }
+]

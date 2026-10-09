@@ -49,3 +49,13 @@ button { cursor: pointer; }
 .log { background: #0a0c10; color: #c9d1d9; border: 1px solid var(--line); border-radius: 8px; padding: 10px; height: 65vh; overflow: auto; margin: 0;
   font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
 code { font: 12px ui-monospace, Menlo, monospace; }
+#burn { margin-left: auto; padding: 4px 12px; border-radius: 14px; font-weight: 600; color: #1a1000; background: var(--money); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--money) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { #burn { animation: none; } }
+tr.burning td:first-child { box-shadow: inset 3px 0 var(--money); }
+.money { color: var(--money); font-weight: 600; }
+.idle { color: var(--money); font-weight: 600; }
+.idlecard { border-color: var(--money); }
+.warnbox { border: 1px solid var(--money); color: var(--money); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+.bad { color: var(--bad); }
+.badge.exited, .badge.stopped, .badge.destroyed { background: var(--line); color: var(--muted); }
