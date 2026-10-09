@@ -39,3 +39,13 @@ table { border-collapse: collapse; width: 100%; }
 .grid th { color: var(--muted); font-weight: 600; font-size: 12px; }
 .grid tr:hover td { background: color-mix(in srgb, var(--line) 40%, transparent); }
 .cmd { max-width: 520px; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+select, input, button { font: inherit; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+button { cursor: pointer; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--line); }
+.badge.running { background: color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent); }
+.badge.done, .badge.complete { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.badge.failed, .badge.error, .badge.lost, .badge.killed { background: color-mix(in srgb, var(--bad) 20%, transparent); color: var(--bad); }
+.log { background: #0a0c10; color: #c9d1d9; border: 1px solid var(--line); border-radius: 8px; padding: 10px; height: 65vh; overflow: auto; margin: 0;
+  font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
+code { font: 12px ui-monospace, Menlo, monospace; }

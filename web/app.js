@@ -14,7 +14,8 @@ function spark(vals, max = 100, w = 140, h = 30) {
 const bar = p => `<span class="bar"><i style="width:${Math.min(p ?? 0, 100)}%" class="${p > 90 ? "hot" : p > 70 ? "warm" : ""}"></i></span>`;
 
 // Live streams owned by the current view; closed on navigation.
-let streams = [];
+let streams = [], timers = [];
+const every = (ms, fn) => timers.push(setInterval(fn, ms));  // cleared on navigation
 function stream(url, onmsg) { const es = new EventSource(url); es.onmessage = e => onmsg(JSON.parse(e.data)); streams.push(es); return es; }
 
 // ---------- Devices (Mac) ----------
@@ -53,14 +54,82 @@ function viewProcesses(el) {
   stream("/api/local/stream", s => { $("#procs").innerHTML = procTable(s.procs); });
 }
 
+// ---------- Runs ----------
+const fmtDur = s => { if (s == null) return "–"; s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `${h}h${String(m).padStart(2, "0")}m` : m ? `${m}m${String(s % 60).padStart(2, "0")}s` : `${s}s`; };
+const fmtT = t => t ? new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "–";
+const money = v => v == null ? "–" : "$" + v.toFixed(2);
+const badge = st => `<span class="badge ${esc(st)}">${esc(st)}</span>`;
+const dur = r => r.started ? fmtDur((r.ended || Date.now() / 1000) - r.started) : "–";
+const filt = JSON.parse(localStorage.getItem("mc.filter") || "{}");
+
+function runsTable(rs) {
+  return `<table class="grid"><thead><tr><th>Status</th><th>Run</th><th>Source</th><th>Project</th><th>Device</th><th>Started</th><th>Duration</th><th>Cost</th></tr></thead><tbody>
+  ${rs.map(r => `<tr><td>${badge(r.status)}</td><td><a href="#/run/${encodeURIComponent(r.id)}">${esc(r.name)}</a></td><td>${esc(r.source)}</td><td>${esc(r.project || "")}</td>
+  <td>${esc(r.device || "")}</td><td>${fmtT(r.started)}</td><td>${dur(r)}</td><td>${r.cost != null ? money(r.cost) + (r.dph ? ` <span class="muted">@${money(r.dph)}/h</span>` : "") : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No runs.</td></tr>`}</tbody></table>`;
+}
+
+function viewRuns(el) {
+  el.innerHTML = `<h2>Runs</h2><div class="toolbar">
+    <select id="fsrc"><option value="">all sources</option><option>local</option><option>vast</option><option>kaggle</option></select>
+    <select id="fproj"><option value="">all projects</option></select></div><div id="runs" class="muted">loading…</div>`;
+  let rs = [];
+  const draw = () => {
+    const projs = [...new Set(rs.map(r => r.project).filter(Boolean))];
+    const sel = $("#fproj"); if (sel.options.length - 1 !== projs.length) sel.innerHTML = `<option value="">all projects</option>` + projs.map(p => `<option>${esc(p)}</option>`).join("");
+    $("#fsrc").value = filt.src || ""; sel.value = filt.proj || "";
+    $("#runs").innerHTML = runsTable(rs.filter(r => (!filt.src || r.source === filt.src) && (!filt.proj || r.project === filt.proj)));
+  };
+  for (const [id, k] of [["#fsrc", "src"], ["#fproj", "proj"]]) $(id).onchange = e => { filt[k] = e.target.value; localStorage.setItem("mc.filter", JSON.stringify(filt)); draw(); };
+  stream("/api/runs/stream", d => { rs = d; draw(); });
+  every(5000, draw);  // running durations tick
+}
+
+// Log viewer: last N lines on connect, auto-scroll that pauses when you scroll up, substring filter.
+function logViewer(el, url) {
+  el.innerHTML = `<div class="toolbar"><input id="q" type="search" placeholder="filter lines…"> <span id="lstat" class="muted"></span>
+    <button id="jump" hidden>⇣ paused, jump to end</button></div><pre id="log" class="log"></pre>`;
+  const pre = $("#log", el), q = $("#q", el), MAX = 20000;
+  let lines = [], follow = true;
+  const match = l => !q.value || l.toLowerCase().includes(q.value.toLowerCase());
+  const add = ls => { const f = document.createDocumentFragment(); for (const l of ls) if (match(l)) { const d = document.createElement("div"); d.textContent = l || " "; f.append(d); } pre.append(f);
+    while (pre.childElementCount > MAX) pre.firstElementChild.remove(); };
+  const status = () => $("#lstat", el).textContent = `${lines.length} lines` + (q.value ? `, ${pre.childElementCount} match` : "");
+  pre.onscroll = () => { follow = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30; $("#jump", el).hidden = follow; };
+  $("#jump", el).onclick = () => { pre.scrollTop = pre.scrollHeight; };
+  q.oninput = () => { pre.textContent = ""; add(lines); status(); pre.scrollTop = pre.scrollHeight; };
+  const es = stream(url, ls => { lines.push(...ls); if (lines.length > MAX) lines = lines.slice(-MAX); add(ls); status(); if (follow) pre.scrollTop = pre.scrollHeight; });
+  es.onerror = () => { $("#lstat", el).textContent = es.readyState === 2 ? "log unavailable" : "reconnecting…"; };
+  es.onopen = () => { lines = []; pre.textContent = ""; };  // server replays the tail on every (re)connect
+  return es;
+}
+
+function viewRun(el, id) {
+  id = decodeURIComponent(id);
+  el.innerHTML = `<div id="rhead"></div><div id="rlog"></div>`;
+  let logStarted = false, rs = [];
+  const head = () => {
+    const r = rs.find(x => x.id === id);
+    if (!r) { $("#rhead").innerHTML = `<p>Unknown run ${esc(id)}</p>`; return; }
+    $("#rhead").innerHTML = `<h2>${esc(r.name)} ${badge(r.status)} <span class="muted">${esc(r.source)}${r.project ? " · " + esc(r.project) : ""}</span></h2>
+      <table class="kv"><tr><td>Started</td><td>${fmtT(r.started)}</td><td>Duration</td><td>${dur(r)}</td></tr>
+      ${r.cmd ? `<tr><td>Command</td><td colspan="3"><code>${esc(r.cmd)}</code></td></tr>` : ""}
+      ${r.pid ? `<tr><td>PID</td><td>${r.pid}</td><td>Exit</td><td>${r.exit_code ?? "–"}</td></tr>` : ""}</table>`;
+    if (!logStarted) { logStarted = true; logViewer($("#rlog"), `/api/runs/${encodeURIComponent(id)}/log`); }
+  };
+  stream("/api/runs/stream", d => { rs = d; head(); });
+  every(5000, () => rs.length && head());
+}
+
 // ---------- Router ----------
 const routes = [
+  [/^#\/runs$/, viewRuns],
+  [/^#\/run\/(.+)$/, viewRun],
   [/^#\/devices$/, viewDevices],
   [/^#\/processes$/, viewProcesses],
   [/^#?\/?$/, viewDevices],  // overview lands in slice (g)
 ];
 function route() {
-  streams.forEach(s => s.close()); streams = [];
+  streams.forEach(s => s.close()); streams = []; timers.forEach(clearInterval); timers = [];
   const h = location.hash || "#/";
   for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("on", a.getAttribute("href") === h.split("?")[0]);
   for (const [re, fn] of routes) { const m = h.match(re); if (m) return fn($("#view"), ...m.slice(1)); }
