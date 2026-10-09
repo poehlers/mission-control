@@ -1,0 +1,8 @@
+[{"stream_name":"stdout","time":29.458915665,"data":"rg 0: 131072 spectra, 8056471 peaks, total peaks 8056471, 15s\n"}
+,{"stream_name":"stdout","time":38.85964622,"data":"rg 1: 131072 spectra, 7943857 peaks, total peaks 16000328, 25s\n"}
+,{"stream_name":"stdout","time":48.117998421,"data":"rg 2: 131072 spectra, 7940932 peaks, total peaks 23941260, 34s\n"}
+,{"stream_name":"stdout","time":57.35836784,"data":"rg 3: 131072 spectra, 7902093 peaks, total peaks 31843353, 43s\n"}
+,{"stream_name":"stderr","time":16519.972283236,"data":"  text = re.sub(r'_', '\\_', text) # Escape underscores in display text\n"}
+,{"stream_name":"stderr","time":16520.95083627,"data":"[NbConvertApp] Converting notebook __script__.ipynb to html\n"}
+,{"stream_name":"stderr","time":16522.000931538,"data":"[NbConvertApp] Writing 315178 bytes to __results__.html\n"}
+]

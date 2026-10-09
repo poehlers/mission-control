@@ -82,7 +82,8 @@ const fmtDur = s => { if (s == null) return "–"; s = Math.max(0, Math.round(s)
 const fmtT = t => t ? new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "–";
 const money = v => v == null ? "–" : "$" + v.toFixed(2);
 const badge = st => `<span class="badge ${esc(st)}">${esc(st)}</span>`;
-const dur = r => r.started ? fmtDur((r.ended || Date.now() / 1000) - r.started) : "–";
+const LIVE = ["running", "queued", "loading", "created"];
+const dur = r => !r.started ? "–" : r.ended ? fmtDur(r.ended - r.started) : LIVE.includes(r.status) ? fmtDur(Date.now() / 1000 - r.started) : "–";
 const filt = JSON.parse(localStorage.getItem("mc.filter") || "{}");
 
 function runsTable(rs) {
@@ -134,6 +135,7 @@ function viewRun(el, id) {
     const r = rs.find(x => x.id === id);
     if (!r) { $("#rhead").innerHTML = `<p>Unknown run ${esc(id)}</p>`; return; }
     if (r.source === "vast") return vastHead(r, !logStarted && (logStarted = true));
+    if (r.source === "kaggle") return kaggleHead(r, !logStarted && (logStarted = true));
     $("#rhead").innerHTML = `<h2>${esc(r.name)} ${badge(r.status)} <span class="muted">${esc(r.source)}${r.project ? " · " + esc(r.project) : ""}</span></h2>
       <table class="kv"><tr><td>Started</td><td>${fmtT(r.started)}</td><td>Duration</td><td>${dur(r)}</td></tr>
       ${r.cmd ? `<tr><td>Command</td><td colspan="3"><code>${esc(r.cmd)}</code></td></tr>` : ""}
@@ -142,6 +144,21 @@ function viewRun(el, id) {
   };
   onRuns(d => { rs = d.runs; head(); });
   every(5000, () => rs.length && head());
+}
+
+// ---------- Kaggle ----------
+const KAGGLE_DONE = ["done", "failed", "cancelled", "unknown"];
+function kaggleHead(r, first) {
+  const m = r.meta, fin = KAGGLE_DONE.includes(r.status);
+  $("#rhead").innerHTML = `<h2>${esc(r.name)} ${badge(r.status)} <span class="muted">kaggle${m.version ? " · v" + m.version : ""}${r.project ? " · " + esc(r.project) : ""}</span></h2>
+    <table class="kv"><tr><td>Started</td><td>${fmtT(r.started)}</td><td>Duration</td><td>${r.ended ? dur(r) : fin ? "– (from the log once fetched)" : dur(r) + " so far"}</td></tr>
+    <tr><td>Accelerator</td><td>${esc(r.device || "–")}</td><td>Kernel</td><td><a href="https://www.kaggle.com/code/${esc(m.ref)}" target="_blank" rel="noopener">${esc(m.ref)} ↗</a></td></tr></table>
+    ${m.failure ? `<p class="bad">Kaggle: ${esc(m.failure)}</p>` : ""}${m.error ? `<p class="bad small">Status lookup failed: ${esc(m.error)}</p>` : ""}`;
+  if (fin && !first && !$("#log")) first = true;  // just finished while we watched: open the log now
+  if (!first) return;
+  if (!fin) { $("#rlog").innerHTML = `<div class="note">Kaggle doesn't stream logs for a running kernel. Status is polled every 60 s, and the full log is fetched automatically when it finishes. No device telemetry either, only the accelerator type.</div>`; return; }
+  $("#rlog").innerHTML = "";
+  logViewer($("#rlog"), `/api/runs/${encodeURIComponent(r.id)}/log`);
 }
 
 // ---------- Vast ----------

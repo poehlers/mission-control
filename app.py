@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import db
-from collectors import local, vast
+from collectors import kaggle, local, vast
 
 ROOT = Path(__file__).parent
 PROJECTS = {p["id"]: p for p in yaml.safe_load((ROOT / "projects.yaml").read_text())["projects"]}
@@ -154,6 +154,39 @@ async def vast_loop():
         await asyncio.sleep(20)  # CLAUDE.md: never faster than 15 s
 
 
+async def kaggle_fetch_log(r):
+    """Full session log for a finished kernel -> logs/<run-id>.log; duration from the log's own timestamps."""
+    raw = await asyncio.to_thread(kaggle.fetch_log, r["meta"]["ref"])
+    text, last = kaggle.parse_log(raw)
+    path = db.LOGS / f"{r['id']}.log"
+    db.LOGS.mkdir(exist_ok=True)
+    path.write_bytes(text)
+    upd = {"id": r["id"], "log": str(path)}
+    if last and r["started"]:
+        upd["ended"] = r["started"] + last
+    db.upsert(con, **upd)
+    return str(path)
+
+
+async def kaggle_loop():
+    prefixes = {pid: p["kernel_prefix"] for pid, p in PROJECTS.items() if p.get("kernel_prefix")}
+    while True:
+        try:
+            known = {}
+            for r in db.runs(con):  # newest first, so this keeps each kernel's latest run
+                if r["source"] == "kaggle":
+                    known.setdefault(r["meta"]["slug"], r)
+            rows, fetch = await asyncio.to_thread(kaggle.poll, known, prefixes)
+            for row in rows:
+                db.upsert(con, **row)
+            for rid in fetch:
+                await kaggle_fetch_log(get_run(rid))
+            sources["kaggle"] = {"ok": True, "error": None, "t": time.time()}
+        except Exception as e:
+            sources["kaggle"] = {"ok": False, "error": str(e)[:300], "t": time.time()}
+        await asyncio.sleep(60)  # status only changes on minutes scale; CLAUDE.md floor is 15 s
+
+
 box_hist = defaultdict(lambda: deque(maxlen=60))  # per instance, 5 s samples
 
 
@@ -182,7 +215,7 @@ async def box_loop():
 
 @asynccontextmanager
 async def lifespan(app):
-    tasks = [asyncio.create_task(c()) for c in (local_loop, runs_loop, vast_loop, box_loop)]
+    tasks = [asyncio.create_task(c()) for c in (local_loop, runs_loop, vast_loop, box_loop, kaggle_loop)]
     yield
     for t in tasks:
         t.cancel()
@@ -245,6 +278,14 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
             async for ls in vast.follow(iid, "/root/queue.log" if name == "queue" else f"/root/logs/{name}", n):
                 yield clean(ls)
         return sse_iter(lines())
+    if r["source"] == "kaggle" and not (r["log"] and Path(r["log"]).exists()):
+        if r["status"] not in kaggle.TERMINAL:
+            raise HTTPException(409, "Kaggle has no live log for a running kernel; the full log is fetched when it finishes.")
+        try:
+            r["meta"] = json.loads(r["meta"])
+            r["log"] = await kaggle_fetch_log(r)
+        except Exception as e:
+            raise HTTPException(502, f"Kaggle log fetch failed: {e}")
     if not r["log"] or not Path(r["log"]).exists():
         raise HTTPException(404, "no log for this run (yet)")
     return sse_iter(follow_file(r["log"], n))

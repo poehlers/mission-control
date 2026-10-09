@@ -59,3 +59,6 @@ tr.burning td:first-child { box-shadow: inset 3px 0 var(--money); }
 .warnbox { border: 1px solid var(--money); color: var(--money); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
 .bad { color: var(--bad); }
 .badge.exited, .badge.stopped, .badge.destroyed { background: var(--line); color: var(--muted); }
+.note { border: 1px dashed var(--line); color: var(--muted); border-radius: 8px; padding: 10px 12px; }
+.badge.queued { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.badge.cancelled, .badge.unknown { background: var(--line); color: var(--muted); }
