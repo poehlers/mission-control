@@ -206,18 +206,93 @@ function boxStream(el, iid, title) {
   stream(`/api/vast/${iid}/stream`, s => { hist.push(s); if (hist.length > 60) hist.shift(); el.innerHTML = boxCard(hist, title); });
 }
 
+// ---------- Projects ----------
+let PROJECTS = [];
+const projReady = fetch("/api/projects").then(r => r.json()).then(ps => {
+  PROJECTS = ps;
+  $("#projnav").innerHTML = ps.map(p => `<a href="#/project/${p.id}">${esc(p.id.toUpperCase())}</a>`).join("");
+});
+const slug = s => s.toLowerCase().trim().replace(/<[^>]+>/g, "").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-");
+marked.use({renderer: {heading(text, level, raw) { return `<h${level} id="${slug(raw)}">${text}</h${level}>\n`; }}});
+const relTo = (base, href) => decodeURIComponent(new URL(href, "http://x/" + base).pathname.slice(1));
+const fileUrl = (pid, path) => `/api/projects/${pid}/file?path=${encodeURIComponent(path)}`;
+const ago = t => { const s = Date.now() / 1000 - t; return s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; };
+
+let mermaidP;
+async function renderMermaid(el) {
+  const blocks = el.querySelectorAll("pre code.language-mermaid");
+  if (!blocks.length) return;
+  mermaidP ??= new Promise((ok, err) => { const s = document.createElement("script"); s.src = "https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"; s.onload = () => { mermaid.initialize({startOnLoad: false, theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "default"}); ok(); }; s.onerror = err; document.head.append(s); });
+  await mermaidP;
+  for (const b of blocks) { const d = document.createElement("div"); d.className = "mermaid"; d.textContent = b.textContent; b.parentElement.replaceWith(d); }
+  await mermaid.run({nodes: el.querySelectorAll(".mermaid")});
+}
+
+async function showDoc(el, p, path, keepScroll) {
+  const r = await fetch(fileUrl(p.id, path));
+  if (!r.ok) { el.innerHTML = `<p class="bad">${esc((await r.json()).detail)}</p>`; return; }
+  const y = scrollY;
+  el.innerHTML = marked.parse(await r.text());
+  for (const img of el.querySelectorAll("img[src]")) if (!/^(https?:|data:)/.test(img.getAttribute("src"))) img.src = fileUrl(p.id, relTo(path, img.getAttribute("src")));
+  for (const a of el.querySelectorAll("a[href]")) {
+    const h = a.getAttribute("href");
+    if (h.startsWith("#")) a.onclick = e => { e.preventDefault(); document.getElementById(decodeURIComponent(h.slice(1)))?.scrollIntoView(); };
+    else if (/^https?:/.test(h)) { a.target = "_blank"; a.rel = "noopener"; }
+    else { const t = relTo(path, h.split("#")[0]); a.href = p.docs.includes(t) ? `#/project/${p.id}/doc/${encodeURIComponent(t)}` : fileUrl(p.id, t); }
+  }
+  renderMermaid(el).catch(e => el.insertAdjacentHTML("afterbegin", `<p class="bad small">mermaid failed: ${esc(e)}</p>`));
+  if (keepScroll) scrollTo(0, y);
+}
+
+async function gitPanel(el, pid) {
+  const r = await fetch(`/api/projects/${pid}/git`);
+  if (!r.ok) { el.innerHTML = `<p class="bad small">${esc((await r.json()).detail)}</p>`; return; }
+  const g = await r.json();
+  el.innerHTML = `<h3>Git <span class="muted small">${esc(g.branch)}</span></h3>
+    <p class="small">${g.files.length ? `<details><summary>${g.files.length} uncommitted change${g.files.length > 1 ? "s" : ""}</summary>${g.files.map(f => `<div><code>${esc(f.xy)}</code> ${esc(f.path)}</div>`).join("")}</details>` : `<span class="muted">working tree clean</span>`}</p>
+    <ul class="commits">${g.commits.map(c => `<li><code>${esc(c.hash)}</code> ${esc(c.subject)} <span class="muted small">${ago(+c.t)}</span></li>`).join("")}</ul>`;
+}
+
+async function viewProject(el, pid, kind, arg) {
+  await projReady;
+  const p = PROJECTS.find(x => x.id === pid);
+  if (!p) { el.innerHTML = `<p>Unknown project ${esc(pid)}</p>`; return; }
+  kind ||= "doc"; arg = arg ? decodeURIComponent(arg) : p.docs[0];
+  const tab = (href, label, on) => `<a href="#/project/${p.id}/${href}" class="${on ? "on" : ""}">${esc(label)}</a>`;
+  el.innerHTML = `<h2>${esc(p.name)} <span class="muted small">${esc(p.path)}</span></h2>
+    <div class="tabs">${p.docs.map(d => tab("doc/" + encodeURIComponent(d), d.split("/").pop().replace(/\.md$/, ""), kind === "doc" && d === arg)).join("")}
+      ${p.architecture ? tab("arch", "Architecture", kind === "arch") : ""}${p.roadmap ? tab("roadmap", "Roadmap", kind === "roadmap") : ""}</div>
+    <div class="projgrid"><div id="pmain"></div><aside id="pgit" class="card"></aside></div>`;
+  const main = $("#pmain"), current = kind === "doc" ? arg : kind === "arch" ? p.architecture : p.roadmap;
+  const render = keep => kind === "doc" ? showDoc(main, p, arg, keep)
+    : kind === "arch" ? (main.innerHTML = `<iframe class="arch" sandbox="allow-scripts allow-popups" src="${fileUrl(p.id, p.architecture)}"></iframe>`)
+    : showRoadmap(main, p);
+  main.className = kind === "doc" ? "card md" : "";
+  render(false);
+  gitPanel($("#pgit"), p.id);
+  let first = true;
+  stream(`/api/projects/${p.id}/watch`, changed => {
+    if (first) { first = false; return; }  // initial snapshot
+    if (current in changed) render(true);
+    gitPanel($("#pgit"), p.id);
+  });
+  every(30000, () => gitPanel($("#pgit"), p.id));
+}
+function showRoadmap(el) { el.innerHTML = `<p class="muted">Roadmap lands in the next slice.</p>`; }
+
 // ---------- Router ----------
 const routes = [
   [/^#\/runs$/, viewRuns],
   [/^#\/run\/(.+)$/, viewRun],
   [/^#\/devices$/, viewDevices],
+  [/^#\/project\/([\w-]+)(?:\/(doc|arch|roadmap)(?:\/(.+))?)?$/, viewProject],
   [/^#\/processes$/, viewProcesses],
   [/^#?\/?$/, viewDevices],  // overview lands in slice (g)
 ];
 function route() {
   cleanups.forEach(f => f()); cleanups = [];
   const h = location.hash || "#/";
-  for (const a of document.querySelectorAll("#nav a")) a.classList.toggle("on", a.getAttribute("href") === h.split("?")[0]);
+  for (const a of document.querySelectorAll("#nav a")) { const href = a.getAttribute("href"); a.classList.toggle("on", href === h || (href.startsWith("#/project/") && h.startsWith(href + "/"))); }
   for (const [re, fn] of routes) { const m = h.match(re); if (m) return fn($("#view"), ...m.slice(1)); }
   $("#view").innerHTML = `<p>Not found: ${esc(h)}</p>`;
 }

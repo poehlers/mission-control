@@ -62,3 +62,20 @@ tr.burning td:first-child { box-shadow: inset 3px 0 var(--money); }
 .note { border: 1px dashed var(--line); color: var(--muted); border-radius: 8px; padding: 10px 12px; }
 .badge.queued { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
 .badge.cancelled, .badge.unknown { background: var(--line); color: var(--muted); }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.tabs a { padding: 6px 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs a.on { color: var(--fg); border-bottom-color: var(--accent); }
+.projgrid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+@media (max-width: 1000px) { .projgrid { grid-template-columns: 1fr; } }
+#pgit { position: sticky; top: 64px; max-height: calc(100vh - 80px); overflow: auto; }
+.commits { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.commits li { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.md { line-height: 1.6; overflow-wrap: break-word; }
+.md table { width: auto; margin: 10px 0; display: block; overflow-x: auto; } .md th, .md td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.md pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow: auto; }
+.md code { background: color-mix(in srgb, var(--line) 60%, transparent); padding: 0 3px; border-radius: 3px; }
+.md pre code { background: none; padding: 0; }
+.md h1, .md h2, .md h3 { scroll-margin-top: 64px; }
+.md img { max-width: 100%; }
+iframe.arch { width: 100%; height: calc(100vh - 170px); border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+#projnav { display: contents; }

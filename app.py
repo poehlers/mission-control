@@ -1,6 +1,7 @@
 """Mission Control: one FastAPI process, SSE for everything live. Bind 127.0.0.1 only."""
 import asyncio
 import json
+import os
 import re
 import time
 from collections import defaultdict, deque
@@ -294,6 +295,89 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
 @app.get("/api/vast/{iid}/stream")
 async def box_stream(iid: int, request: Request):
     return sse(f"box:{iid}", request, list(box_hist[iid]) if iid in box_hist else [])
+
+
+# ---------- Projects (read-only toward each repo) ----------
+def project(pid):
+    if pid not in PROJECTS:
+        raise HTTPException(404, "unknown project")
+    return PROJECTS[pid]
+
+
+SERVABLE = {".md", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js"}
+
+
+def repo_file(p, rel):
+    """A file inside the repo that's safe to show: no traversal, no dotfiles (.git, .env), doc/asset types only."""
+    root = Path(p["path"]).resolve()
+    f = (root / rel).resolve()
+    if not f.is_relative_to(root) or any(part.startswith(".") for part in f.relative_to(root).parts):
+        raise HTTPException(403, "outside the repo or a dotfile")
+    if f.suffix.lower() not in SERVABLE:
+        raise HTTPException(403, f"not a doc/asset type: {f.suffix}")
+    if not f.is_file():
+        raise HTTPException(404, f"{rel} does not exist")
+    return f
+
+
+@app.get("/api/projects")
+async def projects():
+    return [{k: p.get(k) for k in ("id", "name", "path", "docs", "architecture", "roadmap")} for p in PROJECTS.values()]
+
+
+@app.get("/api/projects/{pid}/file")
+async def project_file(pid: str, path: str):
+    return FileResponse(repo_file(project(pid), path), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/projects/{pid}/watch")
+async def project_watch(pid: str):
+    """mtimes of the project's docs/roadmap/architecture; pushes the changed ones (polled every 2 s)."""
+    p = project(pid)
+    paths = [*p.get("docs", []), *(x for x in (p.get("roadmap"), p.get("architecture")) if x)]
+
+    def mtimes():
+        out = {}
+        for rel in paths:
+            try:
+                out[rel] = (Path(p["path"]) / rel).stat().st_mtime
+            except OSError:
+                out[rel] = None
+        return out
+
+    async def gen():
+        last = mtimes()
+        yield last
+        while True:
+            await asyncio.sleep(2)
+            now = mtimes()
+            changed = {k: v for k, v in now.items() if v != last.get(k)}
+            if changed:
+                last = now
+                yield changed
+    return sse_iter(gen())
+
+
+async def git(path, *args):
+    p = await asyncio.create_subprocess_exec(
+        "git", "-C", path, *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})  # status must not refresh the repo's index: read-only
+    out, err = await p.communicate()
+    if p.returncode:
+        raise HTTPException(500, f"git: {err.decode().strip()}")
+    return out.decode(errors="replace")
+
+
+@app.get("/api/projects/{pid}/git")
+async def project_git(pid: str, n: int = 15):
+    path = project(pid)["path"]
+    log, status = await asyncio.gather(
+        git(path, "log", f"-n{n}", "--format=%h%x1f%ct%x1f%an%x1f%s"),
+        git(path, "status", "--porcelain=v1", "--branch"))
+    commits = [dict(zip(("hash", "t", "author", "subject"), l.split("\x1f"))) for l in log.splitlines()]
+    head, *files = status.splitlines()
+    return {"branch": head.removeprefix("## "), "commits": commits,
+            "files": [{"xy": f[:2], "path": f[3:]} for f in files]}
 
 
 class Static(StaticFiles):
