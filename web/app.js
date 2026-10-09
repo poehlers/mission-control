@@ -262,7 +262,7 @@ async function viewProject(el, pid, kind, arg) {
   el.innerHTML = `<h2>${esc(p.name)} <span class="muted small">${esc(p.path)}</span></h2>
     <div class="tabs">${p.docs.map(d => tab("doc/" + encodeURIComponent(d), d.split("/").pop().replace(/\.md$/, ""), kind === "doc" && d === arg)).join("")}
       ${p.architecture ? tab("arch", "Architecture", kind === "arch") : ""}${p.roadmap ? tab("roadmap", "Roadmap", kind === "roadmap") : ""}</div>
-    <div class="projgrid"><div id="pmain"></div><aside id="pgit" class="card"></aside></div>`;
+    <div class="${kind === "roadmap" ? "" : "projgrid"}"><div id="pmain"></div><aside id="pgit" class="card" ${kind === "roadmap" ? "hidden" : ""}></aside></div>`;
   const main = $("#pmain"), current = kind === "doc" ? arg : kind === "arch" ? p.architecture : p.roadmap;
   const render = keep => kind === "doc" ? showDoc(main, p, arg, keep)
     : kind === "arch" ? (main.innerHTML = `<iframe class="arch" sandbox="allow-scripts allow-popups" src="${fileUrl(p.id, p.architecture)}"></iframe>`)
@@ -278,7 +278,14 @@ async function viewProject(el, pid, kind, arg) {
   });
   every(30000, () => gitPanel($("#pgit"), p.id));
 }
-function showRoadmap(el) { el.innerHTML = `<p class="muted">Roadmap lands in the next slice.</p>`; }
+const roadmapItem = it => `<li class="${it.done ? "done" : ""}"><span class="chk">${it.done ? "✓" : "○"}</span><div>${esc(it.text)}${it.date ? ` <span class="date">${esc(it.date)}</span>` : ""}${it.note ? `<div class="muted small">${esc(it.note)}</div>` : ""}</div></li>`;
+async function showRoadmap(el, p) {
+  const r = await (await fetch(`/api/projects/${p.id}/roadmap`)).json();
+  if (!r.exists) { el.innerHTML = `<div class="note">No <code>${esc(r.path || "docs/ROADMAP.md")}</code> in this repo yet. Format: four headings <code>## Done</code>, <code>## Now</code>, <code>## Planned</code>, <code>## Ideas</code> with <code>- [ ] item — note (2026-10-09)</code> lines.</div>`; return; }
+  el.innerHTML = `${r.problems.length ? `<div class="warnbox small"><b>${r.problems.length} line(s) don't fit the roadmap format</b> (shown here instead of silently dropped):<br>${r.problems.map(esc).join("<br>")}</div>` : ""}
+    <div class="board">${Object.entries(r.columns).map(([c, items]) => `<section class="card"><h3>${c} <span class="muted">${items.length}</span></h3><ul class="items">${items.map(roadmapItem).join("") || `<li class="muted">—</li>`}</ul></section>`).join("")}</div>
+    <p class="muted small">Source: <a href="${fileUrl(p.id, r.path)}" target="_blank">${esc(r.path)}</a> (re-read live on change)</p>`;
+}
 
 // ---------- Router ----------
 const routes = [

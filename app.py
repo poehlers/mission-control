@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import db
+import roadmap
 from collectors import kaggle, local, vast
 
 ROOT = Path(__file__).parent
@@ -356,6 +357,17 @@ async def project_watch(pid: str):
                 last = now
                 yield changed
     return sse_iter(gen())
+
+
+@app.get("/api/projects/{pid}/roadmap")
+async def project_roadmap(pid: str):
+    p = project(pid)
+    if not p.get("roadmap"):
+        return {"exists": False, "path": None}
+    f = Path(p["path"]) / p["roadmap"]
+    if not f.is_file():
+        return {"exists": False, "path": p["roadmap"]}
+    return {"exists": True, "path": p["roadmap"], **roadmap.parse(f.read_text(errors="replace"))}
 
 
 async def git(path, *args):
