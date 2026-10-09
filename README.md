@@ -60,3 +60,10 @@ confirmation, and the server rejects any request that doesn't echo the exact act
   Mac stats and box metrics are sampled only while a page shows them. Idle CPU ~0.5% of one core.
 - Each page uses one SSE connection for runs + stats (browsers allow 6 per host), plus one per open log.
 - Accrued Vast cost is uptime × current $/h, an estimate rather than the invoice.
+
+## Projects menu
+
+**Projects ▾** lists each project once:
+- **Tracked**: from `projects.yaml`.
+- **Local**: git repos directly under `/Volumes/T7`, found at server start and shown read-only with their top-level `.md` files.
+- **GitHub only**: your repos (via the logged-in `gh` CLI) that aren't cloned on the T7. They get a page with the README and commits.

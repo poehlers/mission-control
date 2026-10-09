@@ -249,10 +249,29 @@ function boxStream(el, iid, title) {
 
 // ---------- Projects ----------
 let PROJECTS = [];
-const projReady = fetch("/api/projects").then(r => r.json()).then(ps => {
-  PROJECTS = ps;
-  $("#projnav").innerHTML = ps.map(p => `<a href="#/project/${p.id}">${esc(p.id.toUpperCase())}</a>`).join("");
-});
+let GH = null;  // GitHub repos, loaded the first time the menu opens (gh call is ~1-2 s, cached server-side 10 min)
+const isoAgo = s => s ? ago(Date.parse(s) / 1000) : "–";
+// Each project once: tracked (projects.yaml) and local (auto-found git repos) open the full page,
+// with their GitHub repo merged in; GitHub-only repos (no clone on the T7) open a GitHub page.
+function drawProjMenu() {
+  const ghOf = p => GH && !GH.error ? GH.find(r => r.full.toLowerCase() === p.github) : null;
+  const projLink = p => { const r = ghOf(p); return `<a href="#/project/${p.id}"><b>${esc(p.name)}</b>
+      ${p.github ? `<span class="tag">${r?.private ? "🔒 " : ""}GitHub</span>` : `<span class="tag">local only</span>`}
+      <span class="muted small right">${r ? isoAgo(r.pushed) : ""}</span></a>`; };
+  const ghOnly = GH === null ? `<div class="muted small pad">loading GitHub repos…</div>`
+    : GH.error ? `<div class="bad small pad">${esc(GH.error)}</div>`
+    : GH.filter(r => !r.local).map(r => `<a href="#/gh/${r.full}">${r.private ? "🔒 " : ""}${esc(r.full.split("/")[1])}<span class="muted small right">${isoAgo(r.pushed)}</span></a>`).join("") || `<div class="muted small pad">none</div>`;
+  const group = (title, items) => items ? `<div class="menuhead">${title}</div>${items}` : "";
+  $("#projnav").innerHTML = group("Tracked", PROJECTS.filter(p => !p.auto).map(projLink).join(""))
+    + group("Local, found on the T7", PROJECTS.filter(p => p.auto).map(projLink).join(""))
+    + group("GitHub only (not cloned)", ghOnly);
+}
+const projReady = fetch("/api/projects").then(r => r.json()).then(ps => { PROJECTS = ps; drawProjMenu(); });
+let ghP;  // one shared request; the server caches the list for 10 min
+const loadGH = () => ghP ??= fetch("/api/github/repos").then(r => r.ok ? r.json() : r.json().then(x => ({error: x.detail})))
+  .then(d => { GH = d; projReady.then(drawProjMenu); });
+$("#projmenu").addEventListener("toggle", e => e.target.open && loadGH());
+document.addEventListener("click", e => { if (!e.target.closest("#projmenu")) $("#projmenu").open = false; });
 const slug = s => s.toLowerCase().trim().replace(/<[^>]+>/g, "").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-");
 marked.use({renderer: {heading(text, level, raw) { return `<h${level} id="${slug(raw)}">${text}</h${level}>\n`; }}});
 const relTo = (base, href) => decodeURIComponent(new URL(href, "http://x/" + base).pathname.slice(1));
@@ -300,7 +319,13 @@ async function viewProject(el, pid, kind, arg) {
   if (!p) { el.innerHTML = `<p>Unknown project ${esc(pid)}</p>`; return; }
   kind ||= "doc"; arg = arg ? decodeURIComponent(arg) : p.docs[0];
   const tab = (href, label, on) => `<a href="#/project/${p.id}/${href}" class="${on ? "on" : ""}">${esc(label)}</a>`;
-  el.innerHTML = `<h2>${esc(p.name)} <span class="muted small">${esc(p.path)}</span></h2>
+  el.innerHTML = `<h2>${esc(p.name)} <span class="muted small">${esc(p.path)}</span>
+      ${p.github ? `<a class="small" href="https://github.com/${esc(p.github)}" target="_blank" rel="noopener">GitHub ↗</a>` : `<span class="tag">local only</span>`}</h2>
+    ${p.auto ? `<details class="note small"><summary>Found automatically (a git repo on the T7). Showing its top-level .md files. To pick docs, an architecture page, a roadmap or a Kaggle prefix, add it to projects.yaml.</summary><pre>  - id: ${esc(p.id)}
+    name: ${esc(p.name)}
+    path: ${esc(p.path)}
+    docs: [${p.docs.map(esc).join(", ")}]
+    roadmap: docs/ROADMAP.md</pre></details>` : ""}
     <div class="tabs">${p.docs.map(d => tab("doc/" + encodeURIComponent(d), d.split("/").pop().replace(/\.md$/, ""), kind === "doc" && d === arg)).join("")}
       ${p.architecture ? tab("arch", "Architecture", kind === "arch") : ""}${p.roadmap ? tab("roadmap", "Roadmap", kind === "roadmap") : ""}</div>
     <div class="${kind === "roadmap" ? "" : "projgrid"}"><div id="pmain"></div><aside id="pgit" class="card" ${kind === "roadmap" ? "hidden" : ""}></aside></div>`;
@@ -363,11 +388,41 @@ function viewOverview(el) {
   });
 }
 
+// ---------- GitHub repo (not tracked) ----------
+async function viewGitHub(el, full) {
+  el.innerHTML = `<p class="muted">loading ${esc(full)} from GitHub…</p>`;
+  const r = await fetch(`/api/github/${full}`);
+  const d = await r.json();
+  if (!r.ok) { el.innerHTML = `<p class="bad">${esc(d.detail)}</p>`; return; }
+  const id = d.full.split("/")[1].toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  el.innerHTML = `<h2>${d.private ? "🔒 " : ""}${esc(d.full)} <span class="muted small">pushed ${isoAgo(d.pushed)}${d.branch ? " · " + esc(d.branch) : ""}</span>
+      <a class="small" href="${esc(d.url)}" target="_blank" rel="noopener">GitHub ↗</a></h2>
+    ${d.description ? `<p class="muted">${esc(d.description)}</p>` : ""}
+    ${d.local ? `<div class="note">Cloned locally at <code>${esc(d.local)}</code> but not tracked. To give it docs, roadmap and runs here, add this to
+      <code>/Volumes/T7/mission-control/projects.yaml</code> and restart the server:<pre>  - id: ${esc(id)}
+    name: ${esc(d.full.split("/")[1])}
+    path: ${esc(d.local)}
+    docs: [README.md]
+    roadmap: docs/ROADMAP.md</pre></div>` : `<div class="note">Not cloned on the T7, so this page shows GitHub's copy only.</div>`}
+    <div class="projgrid gap"><div class="card md">${d.readme_html || `<p class="muted">No README.</p>`}</div>
+    <aside class="card"><h3>Commits <span class="muted small">${esc(d.branch || "")}</span></h3>
+      <ul class="commits">${d.commits.map(c => `<li><code>${esc(c.sha)}</code> ${esc(c.subject)} <span class="muted small">${isoAgo(c.date)}</span></li>`).join("") || `<li class="muted">No commits.</li>`}</ul></aside></div>`;
+  // README HTML comes from GitHub with repo-relative links; point them at GitHub, never at this dashboard.
+  const base = `${d.url}/blob/${d.branch || "HEAD"}/`;
+  for (const x of el.querySelectorAll(".md a[href]")) {
+    const h = x.getAttribute("href");
+    if (h.startsWith("#")) continue;
+    x.href = new URL(h, base).href; x.target = "_blank"; x.rel = "noopener";
+  }
+  for (const img of el.querySelectorAll(".md img[src]")) if (!/^(https?:|data:)/.test(img.getAttribute("src"))) img.src = new URL(img.getAttribute("src"), `${d.url}/raw/${d.branch || "HEAD"}/`).href;
+}
+
 // ---------- Router ----------
 const routes = [
   [/^#\/runs$/, viewRuns],
   [/^#\/run\/(.+)$/, viewRun],
   [/^#\/devices$/, viewDevices],
+  [/^#\/gh\/([\w.-]+\/[\w.-]+)$/, viewGitHub],
   [/^#\/project\/([\w-]+)(?:\/(doc|arch|roadmap)(?:\/(.+))?)?$/, viewProject],
   [/^#\/processes$/, viewProcesses],
   [/^#?\/?$/, viewOverview],
@@ -375,7 +430,10 @@ const routes = [
 function route() {
   cleanups.forEach(f => f()); cleanups = [];
   const h = location.hash || "#/";
-  for (const a of document.querySelectorAll("#nav a")) { const href = a.getAttribute("href"); a.classList.toggle("on", href === h || (href.startsWith("#/project/") && h.startsWith(href + "/"))); }
+  for (const a of document.querySelectorAll("#nav > a")) a.classList.toggle("on", a.getAttribute("href") === h);
+  $("#projmenu").classList.toggle("on", /^#\/(project|gh)\//.test(h));
+  $("#projmenu").open = false;
+  loadGH();
   for (const [re, fn] of routes) { const m = h.match(re); if (m) return fn($("#view"), ...m.slice(1)); }
   $("#view").innerHTML = `<p>Not found: ${esc(h)}</p>`;
 }

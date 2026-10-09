@@ -17,10 +17,12 @@ from fastapi.staticfiles import StaticFiles
 
 import db
 import roadmap
-from collectors import kaggle, local, vast
+from collectors import github, kaggle, local, vast
 
 ROOT = Path(__file__).parent
 PROJECTS = {p["id"]: p for p in yaml.safe_load((ROOT / "projects.yaml").read_text())["projects"]}
+# ponytail: local repos are discovered once at startup; a new clone shows up after a restart.
+PROJECTS.update(github.discover(PROJECTS))
 sources = {}  # per-source poll health, shown in the UI: {"vast": {"ok": bool, "error": str|None, "t": epoch}}
 
 
@@ -372,7 +374,8 @@ def repo_file(p, rel):
 
 @app.get("/api/projects")
 async def projects():
-    return [{k: p.get(k) for k in ("id", "name", "path", "docs", "architecture", "roadmap")} for p in PROJECTS.values()]
+    return [{k: p.get(k) for k in ("id", "name", "path", "docs", "architecture", "roadmap", "auto", "github")}
+            for p in PROJECTS.values()]
 
 
 @app.get("/api/projects/{pid}/file")
@@ -417,6 +420,37 @@ async def project_roadmap(pid: str):
     if not f.is_file():
         return {"exists": False, "path": p["roadmap"]}
     return {"exists": True, "path": p["roadmap"], **roadmap.parse(f.read_text(errors="replace"))}
+
+
+# ---------- GitHub (via the gh CLI; read-only) ----------
+_gh_cache = {}  # key -> (time, value); ponytail: in-memory TTL, lost on restart, fine for a local dashboard
+
+
+async def cached(key, ttl, fn, *args):
+    hit = _gh_cache.get(key)
+    if hit and time.time() - hit[0] < ttl:
+        return hit[1]
+    try:
+        val = await asyncio.to_thread(fn, *args)
+    except Exception as e:
+        raise HTTPException(502, f"gh: {e}")
+    _gh_cache[key] = (time.time(), val)
+    return val
+
+
+@app.get("/api/github/repos")
+async def github_repos():
+    return await cached("repos", 600, github.repos, PROJECTS)
+
+
+@app.get("/api/github/{owner}/{repo}")
+async def github_repo(owner: str, repo: str):
+    full = f"{owner}/{repo}"
+    rs = await github_repos()
+    r = next((x for x in rs if x["full"].lower() == full.lower()), None)
+    if not r:  # only the user's own repos, never an arbitrary fetch
+        raise HTTPException(404, "not one of your repos")
+    return {**r, **await cached(f"detail:{r['full']}", 300, github.detail, r["full"])}
 
 
 async def git(path, *args):
