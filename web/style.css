@@ -91,3 +91,6 @@ iframe.arch { width: 100%; height: calc(100vh - 170px); border: 1px solid var(--
 @media (max-width: 1000px) { .ovgrid { grid-template-columns: 1fr; } }
 h3.gap { margin-top: 22px; }
 h3 button { font-size: 12px; padding: 2px 8px; margin-left: 6px; }
+.actions { display: flex; gap: 8px; margin: 8px 0; }
+button.danger { border-color: var(--bad); color: var(--bad); }
+button.danger:hover { background: color-mix(in srgb, var(--bad) 15%, transparent); }

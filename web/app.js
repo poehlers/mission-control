@@ -163,10 +163,28 @@ function viewRun(el, id) {
       <table class="kv"><tr><td>Started</td><td>${fmtT(r.started)}</td><td>Duration</td><td>${dur(r)}</td></tr>
       ${r.cmd ? `<tr><td>Command</td><td colspan="3"><code>${esc(r.cmd)}</code></td></tr>` : ""}
       ${r.pid ? `<tr><td>PID</td><td>${r.pid}</td><td>Exit</td><td>${r.exit_code ?? "–"}</td></tr>` : ""}</table>`;
+    $("#rhead").append(actionButtons(r));
     if (!logStarted) { logStarted = true; logViewer($("#rlog"), `/api/runs/${encodeURIComponent(id)}/log`); }
   };
   onRuns(d => { rs = d.runs; head(); });
   every(5000, () => rs.length && head());
+}
+
+// ---------- Lifecycle actions (explicit confirm per exact action) ----------
+async function act(r, action, warning) {
+  if (!confirm(`${action.toUpperCase()} ${r.name} (${r.id})?\n\n${warning}`)) return;
+  const res = await fetch(`/api/runs/${encodeURIComponent(r.id)}/${action}`, {method: "POST", headers: {"X-MC-Confirm": `${action} ${r.id}`}});
+  const body = await res.json();
+  alert(res.ok ? body.detail : `Failed: ${body.detail}`);
+}
+function actionButtons(r) {
+  const b = [];
+  if (r.source === "local" && r.status === "running") b.push(["kill", `Sends SIGTERM to pid ${r.pid}. The job stops, and mc records the exit.`]);
+  if (r.source === "vast" && r.status === "running") b.push(["stop", "GPU billing stops; storage keeps billing and the disk is kept. You can start it again later, but its GPU may be rented out by then."]);
+  if (r.source === "vast" && r.status !== "destroyed") b.push(["destroy", "Deletes the instance AND its disk. Anything not copied off the box (e.g. /root/store) is gone. Billing ends."]);
+  const el = document.createElement("div"); el.className = "actions";
+  for (const [a, w] of b) { const btn = document.createElement("button"); btn.className = "danger"; btn.textContent = a[0].toUpperCase() + a.slice(1) + "…"; btn.onclick = () => act(r, a, w); el.append(btn); }
+  return el;
 }
 
 // ---------- Kaggle ----------
@@ -194,6 +212,7 @@ function vastHead(r, first) {
     <tr><td>Where</td><td>${esc(m.geolocation)}</td><td>Image</td><td><code>${esc(m.image_uuid)}</code></td></tr>
     <tr><td>Status</td><td colspan="3" class="muted">${esc(m.status_msg)}</td></tr></table>
     <p class="muted small">Accrued is uptime × current $/h: an estimate, not Vast's invoice.</p>`;
+  $("#rhead").append(actionButtons(r));
   if (!first) return;
   if (!running) { $("#rlog").innerHTML = `<p class="muted">Not running: logs and live metrics need a running box (ssh).</p>`; return; }
   boxStream($("#rbox"), iid, "Live box metrics");

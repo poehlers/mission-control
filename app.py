@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import psutil
 import yaml
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -299,6 +300,45 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
         raise HTTPException(404, "no log for this run (yet)")
     return sse_iter(follow_file(r["log"], n))
 
+
+
+# ---------- Lifecycle actions: each needs the exact action echoed back from the page's confirm dialog ----------
+ACTIONS = {"local": {"kill"}, "vast": {"stop", "destroy"}}
+
+
+@app.post("/api/runs/{run_id}/{action}")
+async def run_action(run_id: str, action: str, x_mc_confirm: str = Header("")):
+    # A custom header can't be sent cross-origin without a CORS preflight, which this app never allows,
+    # so other pages (including the sandboxed architecture iframe) can't fire these.
+    if x_mc_confirm != f"{action} {run_id}":
+        raise HTTPException(428, "confirm header missing or for a different action")
+    r = get_run(run_id)
+    if action not in ACTIONS.get(r["source"], ()):
+        raise HTTPException(400, f"{action} is not available for {r['source']} runs")
+    if r["source"] == "local":
+        if r["status"] != "running":
+            raise HTTPException(409, f"run is {r['status']}")
+        try:
+            p = psutil.Process(r["pid"])
+            if abs(p.create_time() - r["started"]) > 5:  # pid reused by an unrelated process
+                raise HTTPException(409, "pid now belongs to another process; not killing it")
+            # the whole tree: with a shell command the pid is `sh`, and its children keep the log pipe open
+            tree = p.children(recursive=True) + [p]
+            for q in tree:
+                try:
+                    q.send_signal(signal.SIGTERM)
+                except psutil.NoSuchProcess:
+                    pass
+        except psutil.NoSuchProcess:
+            raise HTTPException(409, "process already gone")
+        return {"ok": True, "detail": f"SIGTERM sent to pid {r['pid']} and {len(tree) - 1} child process(es)"}
+    iid = int(run_id.removeprefix("vast-"))
+    from vastai.sdk import VastAI
+    try:
+        res = await asyncio.to_thread(getattr(VastAI(), f"{action}_instance"), iid)
+    except Exception as e:
+        raise HTTPException(502, f"vast {action} failed: {e}")
+    return {"ok": True, "detail": f"vast {action} {iid}: {str(res)[:200]}"}
 
 
 # ---------- Projects (read-only toward each repo) ----------
