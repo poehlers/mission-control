@@ -33,7 +33,7 @@ exit is recorded. A run whose process disappears without a recorded exit shows a
 
 - **Overview**: Vast burn ($/h, accrued, per box), what's running, what finished since you pressed *Mark seen*, each project's Now column.
 - **Runs**: every local / Kaggle / Vast run, filterable. A run page has the live log (pauses when you scroll up, filter box).
-  Vast: pick the queue log or a job log (ssh `tail -F`, reconnects), live nvidia-smi/CPU/RAM/disk. Kaggle: no live log
+  Vast: pick any log found on the box (`*.log/*.out/*.err` under /root and /workspace, newest first) or type a path (ssh `tail -F`, reconnects), live nvidia-smi/CPU/RAM/disk. Kaggle: no live log
   exists for a running kernel; the full log is fetched when it finishes (or when you open a finished one).
 - **Devices**: this Mac + every running Vast box. **Processes**: heaviest local processes, tracked or not.
 - **MIMS** (one tab per project in `projects.yaml`): docs rendered live from the repo, architecture page, git panel, roadmap board.

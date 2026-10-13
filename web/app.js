@@ -216,12 +216,16 @@ function vastHead(r, first) {
   if (!first) return;
   if (!running) { $("#rlog").innerHTML = `<p class="muted">Not running: logs and live metrics need a running box (ssh).</p>`; return; }
   boxStream($("#rbox"), iid, "Live box metrics");
-  fetch(`/api/runs/${encodeURIComponent(r.id)}/logs`).then(x => x.ok ? x.json() : x.json().then(e => Promise.reject(e.detail))).then(names => {
-    $("#rpick").innerHTML = `<label>Log <select id="lname">${names.map(n => `<option>${esc(n)}</option>`).join("")}</select></label>
-      <span class="muted small">queue = /root/queue.log (follows across jobs); others = /root/logs/&lt;job&gt;.log</span>`;
+  fetch(`/api/runs/${encodeURIComponent(r.id)}/logs`).then(x => x.ok ? x.json() : x.json().then(e => Promise.reject(e.detail))).then(logs => {
+    // every *.log/*.out/*.err found on the box, newest first; the path box takes any other file
+    $("#rpick").innerHTML = `<label>Log <select id="lname">${logs.map(l => `<option value="${esc(l.path)}">${esc(l.path)} · ${ago(l.mtime)} · ${fmtB(l.size)}</option>`).join("")}</select></label>
+      <input id="lpath" placeholder="or any path on the box, Enter" size="32">
+      ${logs.length ? "" : `<span class="muted small">no *.log/*.out/*.err found under /root or /workspace</span>`}`;
     let es;
-    const open = () => { es?.close(); es = logViewer($("#rlog"), `/api/runs/${encodeURIComponent(r.id)}/log?name=${encodeURIComponent($("#lname").value)}`); };
-    $("#lname").onchange = open; open();
+    const open = path => { es?.close(); es = logViewer($("#rlog"), `/api/runs/${encodeURIComponent(r.id)}/log?name=${encodeURIComponent(path)}`); };
+    $("#lname").onchange = () => open($("#lname").value);
+    $("#lpath").onkeydown = e => e.key === "Enter" && e.target.value.trim() && open(e.target.value.trim());
+    if (logs.length) open(logs[0].path);
   }).catch(e => { $("#rlog").innerHTML = `<p class="bad">Can't list logs: ${esc(e)}</p>`; });
 }
 

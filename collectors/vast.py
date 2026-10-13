@@ -1,5 +1,6 @@
 """Vast.ai: instance list via the vastai SDK (key stays in ~/.config/vastai), logs + metrics over ssh."""
 import asyncio
+import re
 import shlex
 
 from runner import split_cr
@@ -118,3 +119,22 @@ async def follow(iid, path, n=500):
         yield [f"--- disconnected (ssh exit {p.returncode}), retrying in 10 s".encode()]
         await asyncio.sleep(10)
         n = 20  # like logs.sh: a little overlap after a reconnect beats silently missing lines
+
+
+# Any log on the box, not just /root/queue.log: *.log/*.out/*.err under /root and /workspace (skipping dot-dirs,
+# venvs, site-packages), plus Vast's own onstart log. Newest first, so the live one is on top.
+FIND_LOGS = (r"find /root /workspace /var/log/onstart.log -maxdepth 5 \( -type d \( -name '.*' -o -name site-packages"
+             r" -o -name node_modules -o -name __pycache__ -o -name wandb \) -prune \) -o -type f"
+             r" \( -name '*.log' -o -name '*.out' -o -name '*.err' \) -size +0 -printf '%T@\t%s\t%p\n' 2>/dev/null"
+             r" | sort -rn | head -60; true")
+LOG_PATH = re.compile(r"^/[^\x00-\x1f]+$")  # any absolute path; shlex.quote makes it shell-safe
+
+
+def parse_logs(out):
+    """find -printf '%T@\\t%s\\t%p' lines -> [{path, mtime, size}] (already newest first)."""
+    logs = []
+    for ln in out.splitlines():
+        parts = ln.split("\t", 2)
+        if len(parts) == 3 and LOG_PATH.match(parts[2]):
+            logs.append({"path": parts[2], "mtime": float(parts[0]), "size": int(parts[1])})
+    return logs

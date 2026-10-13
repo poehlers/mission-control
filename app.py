@@ -266,34 +266,30 @@ def vast_iid(r):
     return iid
 
 
-JOB_LOG = re.compile(r"^[\w.-]+\.log$")
-
-
 @app.get("/api/runs/{run_id}/logs")
 async def run_logs(run_id: str):
-    """Log names a run offers. Vast: the queue log plus per-job logs in /root/logs (newest first)."""
+    """Logs a run offers. Vast: every log file found on the box (vast.FIND_LOGS), newest first."""
     r = get_run(run_id)
     if r["source"] != "vast":
         return ["output"]
     if r["status"] != "running":
         return []
     try:
-        out = await vast.ssh_run(vast_iid(r), "ls -1t /root/logs/ 2>/dev/null; true")
+        return vast.parse_logs(await vast.ssh_run(vast_iid(r), vast.FIND_LOGS))
     except RuntimeError as e:
         raise HTTPException(502, f"ssh: {e}")
-    return ["queue"] + [x for x in out.split() if JOB_LOG.match(x)]
 
 
 @app.get("/api/runs/{run_id}/log")
 async def run_log(run_id: str, name: str = "output", n: int = 500):
     r = get_run(run_id)
     if r["source"] == "vast":
-        if name != "queue" and not JOB_LOG.match(name):
-            raise HTTPException(400, "bad log name")
+        if not vast.LOG_PATH.match(name):
+            raise HTTPException(400, "Vast log name must be an absolute path on the box, e.g. /root/queue.log")
         iid = vast_iid(r)
 
         async def lines():
-            async for ls in vast.follow(iid, "/root/queue.log" if name == "queue" else f"/root/logs/{name}", n):
+            async for ls in vast.follow(iid, name, n):
                 yield clean(ls)
         return sse_iter(lines())
     if r["source"] == "kaggle" and not (r["log"] and Path(r["log"]).exists()):

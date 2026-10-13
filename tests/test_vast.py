@@ -39,3 +39,10 @@ assert abs(b2["cpu"] - 25.0) < 1e-9, b2["cpu"]
 
 assert parse_box(text.replace("23.23", "[N/A]"))["gpus"][0]["power"] is None
 print("ok test_vast")
+
+from collectors.vast import parse_logs
+out = ("1760350000.12\t5321\t/root/queue.log\n1760340000.5\t88\t/workspace/run 2/out.log\n"
+       "1760330000.0\t10\trelative.log\ngarbage\n1760320000.0\t0\t/var/log/onstart.log\n")
+logs = parse_logs(out)
+assert [l["path"] for l in logs] == ["/root/queue.log", "/workspace/run 2/out.log", "/var/log/onstart.log"], logs  # relative refused
+assert logs[0] == {"path": "/root/queue.log", "mtime": 1760350000.12, "size": 5321}
