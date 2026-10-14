@@ -86,6 +86,10 @@ iframe.arch { width: 100%; height: calc(100vh - 170px); border: 1px solid var(--
 .board summary h3::before { content: "▾ "; color: var(--muted); }
 .board details:not([open]) summary h3::before { content: "▸ "; }
 .board details[open] summary { margin-bottom: 8px; }
+.board details:not(.all) .items li:nth-child(n+6) { display: none; }  /* 6 = SHOWN + 1 in app.js */
+.board button.more { margin-top: 8px; width: 100%; font-size: 12px; }
+.board button.more::after { content: "Show " attr(data-n) " more"; }
+.board details.all button.more::after { content: "Show less"; }
 .items { list-style: none; margin: 0; padding: 0; }
 .items li { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .items li.done > div { color: var(--muted); }

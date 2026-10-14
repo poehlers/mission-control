@@ -365,19 +365,26 @@ async function viewProject(el, pid, kind, arg) {
   every(30000, () => gitPanel($("#pgit"), p.id));
 }
 const roadmapItem = it => `<li class="${it.done ? "done" : ""}"><span class="chk">${it.done ? "✓" : "○"}</span><div>${esc(it.text)}${it.date ? ` <span class="date">${esc(it.date)}</span>` : ""}${it.note ? `<div class="muted small">${esc(it.note)}</div>` : ""}</div></li>`;
+const SHOWN = 5;  // items per roadmap column before "Show more"
 async function showRoadmap(el, p) {
   const r = await (await fetch(`/api/projects/${p.id}/roadmap`)).json();
   const key = `mc.roadmapShut.${p.id}`;
-  let shut = []; try { shut = JSON.parse(localStorage.getItem(key)) || []; } catch {}
+  let shut = [], all = []; try { shut = JSON.parse(localStorage.getItem(key)) || []; all = JSON.parse(localStorage.getItem(key + ".all")) || []; } catch {}
   if (!r.exists) { el.innerHTML = `<div class="note">No <code>${esc(r.path || "docs/ROADMAP.md")}</code> in this repo yet. Format: four headings <code>## Done</code>, <code>## Now</code>, <code>## Planned</code>, <code>## Ideas</code> with <code>- [ ] item — note (2026-10-09)</code> lines.</div>`; return; }
   el.innerHTML = `${r.problems.length ? `<div class="warnbox small"><b>${r.problems.length} line(s) don't fit the roadmap format</b> (shown here instead of silently dropped):<br>${r.problems.map(esc).join("<br>")}</div>` : ""}
-    <div class="board">${Object.entries(r.columns).map(([c, items]) => `<details class="card" data-col="${c}" ${shut.includes(c) ? "" : "open"}><summary><h3>${c} <span class="muted">${items.length}</span></h3></summary><ul class="items">${items.map(roadmapItem).join("") || `<li class="muted">—</li>`}</ul></details>`).join("")}</div>
+    <div class="board">${Object.entries(r.columns).map(([c, items]) => `<details class="card ${all.includes(c) ? "all" : ""}" data-col="${c}" ${shut.includes(c) ? "" : "open"}><summary><h3>${c} <span class="muted">${items.length}</span></h3></summary><ul class="items">${items.map(roadmapItem).join("") || `<li class="muted">—</li>`}</ul>${items.length > SHOWN ? `<button class="more" data-n="${items.length - SHOWN}"></button>` : ""}</details>`).join("")}</div>
     <p class="muted small">Source: <a href="${fileUrl(p.id, r.path)}" target="_blank">${esc(r.path)}</a> (re-read live on change)</p>`;
   // collapsed columns are remembered per project, so a live re-render on file change keeps them shut
   el.querySelector(".board").addEventListener("toggle", () => {
     const now = [...el.querySelectorAll(".board details:not([open])")].map(d => d.dataset.col);
     try { localStorage.setItem(key, JSON.stringify(now)); } catch {}
   }, true);
+  el.querySelector(".board").addEventListener("click", e => {
+    if (!e.target.matches("button.more")) return;
+    e.target.closest("details").classList.toggle("all");
+    const now = [...el.querySelectorAll(".board details.all")].map(d => d.dataset.col);
+    try { localStorage.setItem(key + ".all", JSON.stringify(now)); } catch {}
+  });
 }
 
 // ---------- Overview ----------
