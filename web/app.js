@@ -184,17 +184,33 @@ function actionButtons(r) {
   if (r.source === "vast" && r.status !== "destroyed") b.push(["destroy", "Deletes the instance AND its disk. Anything not copied off the box (e.g. /root/store) is gone. Billing ends."]);
   const el = document.createElement("div"); el.className = "actions";
   for (const [a, w] of b) { const btn = document.createElement("button"); btn.className = "danger"; btn.textContent = a[0].toUpperCase() + a.slice(1) + "…"; btn.onclick = () => act(r, a, w); el.append(btn); }
+  if (r.source !== "vast") el.append(statusPicker(r));  // Vast status is re-read from the live instance
+  if (r.meta.manual) el.insertAdjacentHTML("beforeend", `<span class="muted small">status set by hand ${ago(r.meta.manual.t)} (was ${esc(r.meta.manual.from)})</span>`);
   return el;
 }
 
+function statusPicker(r) {
+  const s = document.createElement("select");
+  s.innerHTML = `<option value="">Set status…</option>` + ["done", "failed", "cancelled"].filter(x => x !== r.status).map(x => `<option>${x}</option>`).join("");
+  s.onchange = async () => {
+    const v = s.value; s.value = "";
+    if (!v || !confirm(`Mark ${r.name} as ${v}?\n\nThis only changes Mission Control's record (for runs stuck in the wrong state). Nothing is stopped or killed.`)) return;
+    const res = await fetch(`/api/runs/${encodeURIComponent(r.id)}/status?status=${v}`, {method: "POST", headers: {"X-MC-Confirm": `status ${r.id}`}});
+    if (!res.ok) alert(`Failed: ${(await res.json()).detail}`);
+  };
+  return s;
+}
+
 // ---------- Kaggle ----------
-const KAGGLE_DONE = ["done", "failed", "cancelled", "unknown"];
+const KAGGLE_DONE = ["done", "failed", "cancelled", "unknown", "superseded"];
 function kaggleHead(r, first) {
   const m = r.meta, fin = KAGGLE_DONE.includes(r.status);
   $("#rhead").innerHTML = `<h2>${esc(r.name)} ${badge(r.status)} <span class="muted">kaggle${m.version ? " · v" + m.version : ""}${r.project ? " · " + esc(r.project) : ""}</span></h2>
     <table class="kv"><tr><td>Started</td><td>${fmtT(r.started)}</td><td>Duration</td><td>${r.ended ? dur(r) : fin ? "– (from the log once fetched)" : dur(r) + " so far"}</td></tr>
     <tr><td>Accelerator</td><td>${esc(r.device || "–")}</td><td>Kernel</td><td><a href="https://www.kaggle.com/code/${esc(m.ref)}" target="_blank" rel="noopener">${esc(m.ref)} ↗</a></td></tr></table>
-    ${m.failure ? `<p class="bad">Kaggle: ${esc(m.failure)}</p>` : ""}${m.error ? `<p class="bad small">Status lookup failed: ${esc(m.error)}</p>` : ""}`;
+    ${m.failure ? `<p class="bad">Kaggle: ${esc(m.failure)}</p>` : ""}${m.error ? `<p class="bad small">Status lookup failed: ${esc(m.error)}</p>` : ""}
+    ${r.status === "superseded" ? `<p class="muted small">A newer version was pushed before this one was seen finishing. Kaggle's API only reports the latest version, so this one's outcome is unknown; set it by hand if you know it.</p>` : ""}`;
+  $("#rhead").append(actionButtons(r));
   if (fin && !first && !$("#log")) first = true;  // just finished while we watched: open the log now
   if (!first) return;
   if (!fin) { $("#rlog").innerHTML = `<div class="note">Kaggle doesn't stream logs for a running kernel. Status is polled every 60 s, and the full log is fetched automatically when it finishes. No device telemetry either, only the accelerator type.</div>`; return; }

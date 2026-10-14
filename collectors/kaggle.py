@@ -67,6 +67,20 @@ def fetch_log(ref):
     return _client_call("list_kernel_session_output", "ApiListKernelSessionOutputRequest", ref, page_size=1).log or ""
 
 
+def superseded(runs):
+    """Ids of older kernel versions still marked unfinished. Kaggle's API only reports a kernel's latest version,
+    so once a newer one is pushed an older queued/running row would otherwise stay that way forever."""
+    latest, out = set(), []
+    for r in runs:  # newest first
+        if r["source"] != "kaggle":
+            continue
+        slug = r["meta"]["slug"]
+        if slug in latest and r["status"] not in SETTLED and r["status"] != "superseded":
+            out.append(r["id"])
+        latest.add(slug)
+    return out
+
+
 def _http_status(e):
     return getattr(getattr(e, "response", None), "status_code", None)
 

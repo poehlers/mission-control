@@ -54,6 +54,12 @@ Exactly those four headings. Lines that don't fit are listed above the board rat
 Run pages have **Kill** (local, SIGTERM to the process tree), **Stop** and **Destroy** (Vast). Each asks for
 confirmation, and the server rejects any request that doesn't echo the exact action and run id. Kaggle has no cancel button.
 
+Local and Kaggle run pages also have **Set status…** (done / failed / cancelled) for runs stuck in the wrong state.
+It only changes the record here and is noted on the run page. Pollers don't undo it: Kaggle skips finished rows,
+and a local runner that later exits still writes its real status. Vast has none, since its status is re-read from
+the instance. An older Kaggle version that was still unfinished when a newer one was pushed becomes `superseded`
+automatically, because Kaggle's API only reports the latest version.
+
 ## Notes
 
 - Polling: Vast every 20 s, Kaggle every 60 s (at most 8 Kaggle API calls per tick; it rate-limits bursts).

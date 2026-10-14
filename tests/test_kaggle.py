@@ -80,3 +80,12 @@ assert "404" in rows[0]["meta"]["error"]
 rows2, _ = kaggle.poll({r["name"]: r for r in rows}, prefixes, budget=100)
 assert all(r["name"] not in ("k0", "k1") for r in rows2)  # settled kernels cost nothing next tick
 print("ok test_kaggle budget/backoff")
+
+from collectors.kaggle import superseded
+rs = [{"id": "kaggle-s-v2", "source": "kaggle", "status": "done", "meta": {"slug": "s"}},
+      {"id": "vast-1", "source": "vast", "status": "running", "meta": {}},
+      {"id": "kaggle-s-v1", "source": "kaggle", "status": "queued", "meta": {"slug": "s"}},
+      {"id": "kaggle-t-v3", "source": "kaggle", "status": "running", "meta": {"slug": "t"}},
+      {"id": "kaggle-s-v0", "source": "kaggle", "status": "done", "meta": {"slug": "s"}}]
+assert superseded(rs) == ["kaggle-s-v1"]  # latest version of each kernel and settled old ones are left alone
+print("ok test_kaggle superseded")

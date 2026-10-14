@@ -61,7 +61,7 @@ tr.burning td:first-child { box-shadow: inset 3px 0 var(--money); }
 .badge.exited, .badge.stopped, .badge.destroyed { background: var(--line); color: var(--muted); }
 .note { border: 1px dashed var(--line); color: var(--muted); border-radius: 8px; padding: 10px 12px; }
 .badge.queued { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
-.badge.cancelled, .badge.unknown { background: var(--line); color: var(--muted); }
+.badge.cancelled, .badge.unknown, .badge.superseded { background: var(--line); color: var(--muted); }
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
 .tabs a { padding: 6px 12px; color: var(--muted); border-bottom: 2px solid transparent; }
 .tabs a.on { color: var(--fg); border-bottom-color: var(--accent); }

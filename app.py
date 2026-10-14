@@ -155,10 +155,12 @@ async def kaggle_loop():
     prefixes = {pid: p["kernel_prefix"] for pid, p in PROJECTS.items() if p.get("kernel_prefix")}
     while True:
         try:
-            known = {}
-            for r in db.runs(con):  # newest first, so this keeps each kernel's latest run
+            known, rs = {}, db.runs(con)
+            for r in rs:  # newest first, so this keeps each kernel's latest run
                 if r["source"] == "kaggle":
                     known.setdefault(r["meta"]["slug"], r)
+            for rid in kaggle.superseded(rs):
+                db.upsert(con, id=rid, status="superseded")
             rows, fetch = await asyncio.to_thread(kaggle.poll, known, prefixes)
             for row in rows:
                 db.upsert(con, **row)
@@ -293,6 +295,8 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
                 yield clean(ls)
         return sse_iter(lines())
     if r["source"] == "kaggle" and not (r["log"] and Path(r["log"]).exists()):
+        if r["status"] == "superseded" or "manual" in json.loads(r["meta"]):  # the API would hand us the latest version's log
+            raise HTTPException(404, "no log: Kaggle only serves the latest version's log, which may not be this run's")
         if r["status"] not in kaggle.TERMINAL:
             raise HTTPException(409, "Kaggle has no live log for a running kernel; the full log is fetched when it finishes.")
         try:
@@ -304,6 +308,24 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
         raise HTTPException(404, "no log for this run (yet)")
     return sse_iter(follow_file(r["log"], n))
 
+
+
+# ---------- Manual status: for runs a poller can't settle (e.g. an old Kaggle version). DB only, touches nothing remote.
+MANUAL = {"done", "failed", "cancelled"}
+
+
+@app.post("/api/runs/{run_id}/status")
+async def set_status(run_id: str, status: str, x_mc_confirm: str = Header("")):
+    if x_mc_confirm != f"status {run_id}":  # same cross-origin guard as the actions below
+        raise HTTPException(428, "confirm header missing or for a different run")
+    r = get_run(run_id)
+    if r["source"] == "vast":
+        raise HTTPException(400, "Vast status comes from the live instance and is re-read every 20 s; stop/destroy it instead")
+    if status not in MANUAL:
+        raise HTTPException(400, f"status must be one of {sorted(MANUAL)}")
+    meta = {**json.loads(r["meta"] or "{}"), "manual": {"from": r["status"], "t": time.time()}}
+    db.upsert(con, id=run_id, status=status, meta=meta)
+    return {"ok": True, "detail": f"{r['name']}: {r['status']} → {status}"}
 
 
 # ---------- Lifecycle actions: each needs the exact action echoed back from the page's confirm dialog ----------
