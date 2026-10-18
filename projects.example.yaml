@@ -1,0 +1,12 @@
+# Copy to projects.yaml (gitignored) and edit. Without it, Mission Control still shows every git repo
+# in the folder it sits in (or $MC_SCAN_DIR) plus your GitHub repos, read-only.
+# Docs, roadmap and architecture paths are relative to `path` and read live; nothing is copied.
+projects:
+  - id: myproj                       # short, lowercase; also `mc run --project myproj` and the Vast label prefix
+    name: My Project
+    path: ~/code/myproj
+    docs: [README.md, docs/ARCHITECTURE.md]   # one tab each, in this order
+    architecture: docs/architecture.html      # optional, self-contained HTML shown in a sandboxed iframe
+    roadmap: docs/ROADMAP.md                  # optional, ## Done / ## Now / ## Planned / ## Ideas
+    kaggle_user: your-kaggle-username         # optional
+    kernel_prefix: myproj-                    # Kaggle kernels whose slug starts with this belong here

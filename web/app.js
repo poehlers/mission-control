@@ -272,7 +272,7 @@ let PROJECTS = [];
 let GH = null;  // GitHub repos, loaded the first time the menu opens (gh call is ~1-2 s, cached server-side 10 min)
 const isoAgo = s => s ? ago(Date.parse(s) / 1000) : "–";
 // Each project once: tracked (projects.yaml) and local (auto-found git repos) open the full page,
-// with their GitHub repo merged in; GitHub-only repos (no clone on the T7) open a GitHub page.
+// with their GitHub repo merged in; GitHub-only repos (not cloned locally) open a GitHub page.
 function drawProjMenu() {
   const ghOf = p => GH && !GH.error ? GH.find(r => r.full.toLowerCase() === p.github) : null;
   const projLink = p => { const r = ghOf(p); return `<a href="#/project/${p.id}"><b>${esc(p.name)}</b>
@@ -283,7 +283,7 @@ function drawProjMenu() {
     : GH.filter(r => !r.local).map(r => `<a href="#/gh/${r.full}">${r.private ? "🔒 " : ""}${esc(r.full.split("/")[1])}<span class="muted small right">${isoAgo(r.pushed)}</span></a>`).join("") || `<div class="muted small pad">none</div>`;
   const group = (title, items) => items ? `<div class="menuhead">${title}</div>${items}` : "";
   $("#projnav").innerHTML = group("Tracked", PROJECTS.filter(p => !p.auto).map(projLink).join(""))
-    + group("Local, found on the T7", PROJECTS.filter(p => p.auto).map(projLink).join(""))
+    + group("Local, found automatically", PROJECTS.filter(p => p.auto).map(projLink).join(""))
     + group("GitHub only (not cloned)", ghOnly);
 }
 const projReady = fetch("/api/projects").then(r => r.json()).then(ps => { PROJECTS = ps; drawProjMenu(); });
@@ -341,7 +341,7 @@ async function viewProject(el, pid, kind, arg) {
   const tab = (href, label, on) => `<a href="#/project/${p.id}/${href}" class="${on ? "on" : ""}">${esc(label)}</a>`;
   el.innerHTML = `<h2>${esc(p.name)} <span class="muted small">${esc(p.path)}</span>
       ${p.github ? `<a class="small" href="https://github.com/${esc(p.github)}" target="_blank" rel="noopener">GitHub ↗</a>` : `<span class="tag">local only</span>`}</h2>
-    ${p.auto ? `<details class="note small"><summary>Found automatically (a git repo on the T7). Showing its top-level .md files. To pick docs, an architecture page, a roadmap or a Kaggle prefix, add it to projects.yaml.</summary><pre>  - id: ${esc(p.id)}
+    ${p.auto ? `<details class="note small"><summary>Found automatically (a git repo next to Mission Control). Showing its top-level .md files. To pick docs, an architecture page, a roadmap or a Kaggle prefix, add it to projects.yaml.</summary><pre>  - id: ${esc(p.id)}
     name: ${esc(p.name)}
     path: ${esc(p.path)}
     docs: [${p.docs.map(esc).join(", ")}]
@@ -364,7 +364,8 @@ async function viewProject(el, pid, kind, arg) {
   });
   every(30000, () => gitPanel($("#pgit"), p.id));
 }
-const roadmapItem = it => `<li class="${it.done ? "done" : ""}"><span class="chk">${it.done ? "✓" : "○"}</span><div>${esc(it.text)}${it.date ? ` <span class="date">${esc(it.date)}</span>` : ""}${it.note ? `<div class="muted small">${esc(it.note)}</div>` : ""}</div></li>`;
+const code = s => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");  // inline `code` only; rest stays plain text
+const roadmapItem = it => `<li class="${it.done ? "done" : ""}"><span class="chk">${it.done ? "✓" : "○"}</span><div>${code(it.text)}${it.date ? ` <span class="date">${esc(it.date)}</span>` : ""}${it.note ? `<div class="muted small">${code(it.note)}</div>` : ""}</div></li>`;
 const SHOWN = 5;  // items per roadmap column before "Show more"
 async function showRoadmap(el, p) {
   const r = await (await fetch(`/api/projects/${p.id}/roadmap`)).json();
@@ -433,11 +434,11 @@ async function viewGitHub(el, full) {
       <a class="small" href="${esc(d.url)}" target="_blank" rel="noopener">GitHub ↗</a></h2>
     ${d.description ? `<p class="muted">${esc(d.description)}</p>` : ""}
     ${d.local ? `<div class="note">Cloned locally at <code>${esc(d.local)}</code> but not tracked. To give it docs, roadmap and runs here, add this to
-      <code>/Volumes/T7/mission-control/projects.yaml</code> and restart the server:<pre>  - id: ${esc(id)}
+      <code>projects.yaml</code> and restart the server:<pre>  - id: ${esc(id)}
     name: ${esc(d.full.split("/")[1])}
     path: ${esc(d.local)}
     docs: [README.md]
-    roadmap: docs/ROADMAP.md</pre></div>` : `<div class="note">Not cloned on the T7, so this page shows GitHub's copy only.</div>`}
+    roadmap: docs/ROADMAP.md</pre></div>` : `<div class="note">Not cloned locally, so this page shows GitHub's copy only.</div>`}
     <div class="projgrid gap"><div class="card md">${d.readme_html || `<p class="muted">No README.</p>`}</div>
     <aside class="card"><h3>Commits <span class="muted small">${esc(d.branch || "")}</span></h3>
       <ul class="commits">${d.commits.map(c => `<li><code>${esc(c.sha)}</code> ${esc(c.subject)} <span class="muted small">${isoAgo(c.date)}</span></li>`).join("") || `<li class="muted">No commits.</li>`}</ul></aside></div>`;

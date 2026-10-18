@@ -1,10 +1,12 @@
 """GitHub repos via the gh CLI (token stays in gh's keyring). Blocking; app.py calls these via asyncio.to_thread."""
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 
-SCAN = Path("/Volumes/T7")  # where local clones live (top level only)
+# where local clones live (top level only); default: the folder this repo sits in
+SCAN = Path(os.environ.get("MC_SCAN_DIR") or Path(__file__).resolve().parents[2])
 
 
 def gh(*args):

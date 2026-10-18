@@ -1,0 +1,21 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Parser tests (real sample input)
+        run: for t in tests/test_*.py; do python "$t" || exit 1; done
+      - name: Server starts and serves without a projects.yaml or any credentials
+        run: |
+          python -m uvicorn app:app --host 127.0.0.1 --port 8787 &
+          for i in $(seq 20); do curl -fsS -o /dev/null 127.0.0.1:8787/ && break; sleep 0.5; done
+          curl -fsS 127.0.0.1:8787/ | grep -q "Mission Control"
+          curl -fsS 127.0.0.1:8787/api/projects
+          curl -fsS 127.0.0.1:8787/api/runs

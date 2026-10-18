@@ -1,4 +1,5 @@
-"""Local Mac stats via psutil. No GPU/temps without sudo, so they're simply absent."""
+"""Local host stats via psutil (built on macOS; Linux shows its real mounts). No GPU/temps without sudo, so they're simply absent."""
+import sys
 import time
 
 import psutil
@@ -10,7 +11,9 @@ def _disks():
     out = []
     for p in psutil.disk_partitions():
         # APFS: "/" is the sealed system snapshot; real usage lives on the Data volume
-        if p.mountpoint == "/System/Volumes/Data" or p.mountpoint.startswith("/Volumes/"):
+        mac = sys.platform == "darwin"
+        if (p.mountpoint == "/System/Volumes/Data" or p.mountpoint.startswith("/Volumes/")) if mac \
+                else not p.mountpoint.startswith(("/boot", "/snap")):
             try:
                 u = psutil.disk_usage(p.mountpoint)
             except OSError:  # volume ejected between listing and stat

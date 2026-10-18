@@ -20,7 +20,9 @@ import roadmap
 from collectors import github, kaggle, local, vast
 
 ROOT = Path(__file__).parent
-PROJECTS = {p["id"]: p for p in yaml.safe_load((ROOT / "projects.yaml").read_text())["projects"]}
+CONFIG = ROOT / "projects.yaml"  # copy projects.example.yaml; without it only auto-discovered repos show
+PROJECTS = {p["id"]: {**p, "path": os.path.expanduser(p["path"])}
+            for p in (yaml.safe_load(CONFIG.read_text()) if CONFIG.exists() else {}).get("projects") or []}
 # ponytail: local repos are discovered once at startup; a new clone shows up after a restart.
 PROJECTS.update(github.discover(PROJECTS))
 sources = {}  # per-source poll health, shown in the UI: {"vast": {"ok": bool, "error": str|None, "t": epoch}}
@@ -198,9 +200,20 @@ async def box_loop():
         await asyncio.sleep(5)
 
 
+def has_creds(env, files):
+    """A cloud poller only starts when its CLI is configured; otherwise it would just show as failing."""
+    return any(os.environ.get(e) for e in env) or any(Path(f).expanduser().exists() for f in files)
+
+
 @asynccontextmanager
 async def lifespan(app):
-    tasks = [asyncio.create_task(c()) for c in (local_loop, runs_loop, vast_loop, box_loop, kaggle_loop)]
+    loops = [local_loop, runs_loop]
+    if has_creds(["VAST_API_KEY"], ["~/.config/vastai/vast_api_key", "~/.vast_api_key"]):
+        loops += [vast_loop, box_loop]
+    kdir = os.environ.get("KAGGLE_CONFIG_DIR", "~/.kaggle")
+    if has_creds(["KAGGLE_USERNAME", "KAGGLE_API_TOKEN"], [f"{kdir}/{f}" for f in ("kaggle.json", "access_token", "credentials.json")]):
+        loops.append(kaggle_loop)
+    tasks = [asyncio.create_task(c()) for c in loops]
     yield
     for t in tasks:
         t.cancel()

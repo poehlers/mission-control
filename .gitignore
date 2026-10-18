@@ -4,3 +4,5 @@ data/
 logs/
 .DS_Store
 ._*
+projects.yaml
+.claude/

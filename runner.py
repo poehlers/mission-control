@@ -2,7 +2,7 @@
 
 Starts <cmd>, tees stdout+stderr to the terminal (unchanged) and to logs/<run-id>.log (tqdm's \\r turned into
 newlines), and registers the run in data/mc.db. A single <cmd> argument runs through the shell, so pipes work:
-    mc run sweep --project mims -- 'python a.py | tee x'
+    mc run sweep --project myproj -- 'python a.py | tee x'
 """
 import os
 import re
