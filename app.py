@@ -136,7 +136,7 @@ async def vast_loop():
             sources["vast"] = {"ok": True, "error": None, "t": now}
         except Exception as e:  # network/API hiccup: show it, keep the last known rows
             sources["vast"] = {"ok": False, "error": str(e)[:300], "t": time.time()}
-        await asyncio.sleep(20)  # CLAUDE.md: never faster than 15 s
+        await asyncio.sleep(20)  # Vast API: never poll faster than 15 s
 
 
 async def kaggle_fetch_log(r):
@@ -171,7 +171,7 @@ async def kaggle_loop():
             sources["kaggle"] = {"ok": True, "error": None, "t": time.time()}
         except Exception as e:
             sources["kaggle"] = {"ok": False, "error": str(e)[:300], "t": time.time()}
-        await asyncio.sleep(60)  # status only changes on minutes scale; CLAUDE.md floor is 15 s
+        await asyncio.sleep(60)  # status only changes on minutes scale; never faster than 15 s
 
 
 box_hist = defaultdict(lambda: deque(maxlen=60))  # per instance, 5 s samples
