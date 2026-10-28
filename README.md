@@ -1,6 +1,6 @@
 # Mission Control
 
-**A local, live dashboard for ML side projects: every run on your laptop, Kaggle and Vast.ai in one table, with
+**A local, live dashboard for ML side projects: every run on your laptop, your own servers, Kaggle and Vast.ai in one table, with
 streaming logs, GPU stats, cloud spend and each repo's docs and roadmap.**
 
 [![tests](https://github.com/poehlers/mission-control/actions/workflows/ci.yml/badge.svg)](https://github.com/poehlers/mission-control/actions/workflows/ci.yml)
@@ -22,6 +22,7 @@ one CPU core when idle so it can run next to real work.
   - **Local:** jobs you start with `mc run`.
   - **Kaggle:** kernels, polled within an API budget.
   - **Vast.ai:** instances, with live $/h burn and an estimate of what has accrued.
+  - **Home servers:** your own LAN boxes and workstations over ssh, including jobs inside their docker containers.
 - **Live logs over Server-Sent Events.**
   - On connect you get the last N lines, then new lines as they arrive.
   - Auto-scroll pauses when you scroll up; there's a filter box; ANSI codes are stripped.
@@ -36,7 +37,7 @@ one CPU core when idle so it can run next to real work.
   - **Menu:** tracked repos, repos found next to Mission Control, and GitHub-only repos (via `gh`) are listed once each.
 - **Roadmap boards** (Done / Now / Planned / Ideas) parsed from each repo's `docs/ROADMAP.md`. Lines that don't fit
   the format are listed above the board instead of being silently dropped.
-- **Guarded actions:** kill a local process tree, or stop/destroy a Vast instance.
+- **Guarded actions:** kill a local process tree or a job on your server, or stop/destroy a Vast instance.
   - Each action needs an explicit confirm.
   - The server rejects any request that doesn't echo the exact action and run id.
   - Runs stuck in the wrong state (e.g. an old Kaggle version) can be given a status by hand; this only changes the record.
@@ -53,7 +54,7 @@ flowchart LR
     L["mc run (runner.py)<br/>tee → logs/, SQLite row"]
     K["Kaggle API<br/>60 s, ≤8 calls/tick"]
     V["Vast.ai API<br/>20 s"]
-    S["ssh to Vast boxes<br/>tail -F, nvidia-smi"]
+    S["ssh to Vast boxes + home servers<br/>tail -F, nvidia-smi, docker"]
     P["psutil (this Mac)"]
     R["project repos<br/>docs, ROADMAP.md, git"]
   end
@@ -127,11 +128,35 @@ mc run demo -- python examples/demo_train.py             # try it without a real
 - The runner ignores SIGHUP, so closing the terminal doesn't kill the job.
 - A run whose process vanishes without a recorded exit is marked `lost`.
 
+### Run on your own servers
+
+Add the machine under `servers:` in `projects.yaml` (see `projects.example.yaml`). Every minute Mission Control checks
+it over ssh (key auth from your agent; `BatchMode`, so it never asks for a password):
+- **Health:** up/down, CPU, RAM, disk, load, GPUs if `nvidia-smi` exists, and running docker containers.
+- **Jobs:** every `*.log/*.out/*.err` written in the last week under the server's run roots and each container's
+  `/root`. A log written in the last 5 min counts as a running job; you can follow it live, through `docker exec`
+  when it's inside a container.
+
+Servers are read-only by default. With `allow_launch: true` on a server:
+
+```sh
+mc run --on homelab --container myproj-lab sweep --project myproj -- 'python -m src.sweep'
+```
+
+**What `mc run --on` does:**
+- It starts the job detached (`setsid nohup`), so it survives the ssh session.
+- Output goes to `mc-logs/<run-id>.log` under the server's first run root, or under the container's `/root`.
+- `mc` returns right away, and the run is recorded like a local one.
+- The exit code comes back via a final `[mc] exit N` line in the log.
+- **Kill** signals the job's process group, after checking that the pid still writes that log. Nothing else on a home
+  server is ever stopped or destroyed.
+
 ### Link cloud runs to a project
 
 - **Kaggle:** kernels whose slug starts with the project's `kernel_prefix` (e.g. `myproj-…`) belong to it. There's one
   row per kernel version.
 - **Vast.ai:** label the instance `<project-id>-<what>` (`vastai label instance 123 myproj-sweep`).
+- **Home servers:** name the container or a directory in the log path `<project-id>` or `<project-id>-…`.
 
 ### Roadmap format (`docs/ROADMAP.md` in each project)
 
@@ -171,6 +196,7 @@ Each parser has a small assert-based test against real (redacted) sample input:
 - the tqdm `\r` splitter
 - Kaggle status mapping, poll budget and back-off
 - Vast instance JSON, `nvidia-smi` output and log discovery
+- home-server metrics, log discovery (with docker bind-mount dedup), run settling, and the generated shell scripts
 - GitHub remote parsing
 
 CI runs these and also boots the server with no config and no credentials.
@@ -179,7 +205,7 @@ CI runs these and also boots the server with no config and no credentials.
 
 ```
 app.py            FastAPI app: routes, SSE hub and streams, collector loops, guarded actions
-collectors/       local.py (psutil) · kaggle.py · vast.py (API + ssh) · github.py (gh CLI, repo discovery)
+collectors/       local.py (psutil) · kaggle.py · vast.py (API + ssh) · servers.py (home servers) · github.py
 runner.py  mc     `mc run`: launch, tee, register, record exit
 roadmap.py db.py  ROADMAP.md parser · SQLite run registry
 web/              index.html, app.js, style.css (no build step)
@@ -190,6 +216,8 @@ tests/            one test per parser, with real sample input in tests/samples/
 
 - macOS host stats (no GPU or temperature without sudo). Linux works for everything else but is less tested.
 - New local clones are discovered at server start.
+- Home servers need Linux with GNU find (`/proc`, `find -printf`). Containers built on Alpine/busybox aren't searched
+  for logs, but `mc run --on` still works there.
 - Kaggle's API reports only a kernel's latest version. Older versions still unfinished when a newer one is pushed are
   marked `superseded`.
 

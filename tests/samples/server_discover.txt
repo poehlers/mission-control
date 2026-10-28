@@ -1,0 +1,23 @@
+	1793180066.2212679880	28	/home/user/qcc/logs/gf12_flip_p500000.log
+	1793180066.1072687840	28	/home/user/qcc/logs/gf12_flip_p20000.log
+	1793180094.9630676090	83	/home/user/qcc/logs/gf12_lns_k5.log
+	1793180066.0602691120	28	/home/user/qcc/logs/gf12_flip_p5000.log
+	1793180066.1562684420	28	/home/user/qcc/logs/gf12_flip_p100000.log
+	1793180066.3952667730	33	/home/user/qcc/logs/gf12_lns_k7.log
+	1793180066.3312672200	33	/home/user/qcc/logs/gf12_lns_k6.log
+	1793180066.0272693430	28	/home/user/qcc/logs/gf12_flip_p2000.log
+	1793180097.4460502980	71	/home/user/mc-logs/20261028-103442-mc-selftest.log
+qcc-lab	1793180082.6501534500	13	/root/mc-logs/20261028-103442-qcc-selftest.log
+qcc-lab	1793180066.2212679880	28	/root/qcc/logs/gf12_flip_p500000.log
+qcc-lab	1793180066.1072687840	28	/root/qcc/logs/gf12_flip_p20000.log
+qcc-lab	1793180094.9630676090	83	/root/qcc/logs/gf12_lns_k5.log
+qcc-lab	1793180066.0602691120	28	/root/qcc/logs/gf12_flip_p5000.log
+qcc-lab	1793180066.1562684420	28	/root/qcc/logs/gf12_flip_p100000.log
+qcc-lab	1793180066.3952667730	33	/root/qcc/logs/gf12_lns_k7.log
+qcc-lab	1793180066.3312672200	33	/root/qcc/logs/gf12_lns_k6.log
+qcc-lab	1793180066.0272693430	28	/root/qcc/logs/gf12_flip_p2000.log
+@@
+20261028-103442-mc-killtest	@@alive@@
+20261028-103442-mc-selftest	[mc] exit 0
+20261028-103442-qcc-selftest	[mc] exit 3
+20261028-x-gone	some last line

@@ -121,3 +121,7 @@ button.danger:hover { background: color-mix(in srgb, var(--bad) 15%, transparent
 .gap { margin-top: 14px; }
 .note pre { margin: 8px 0 0; font: 12px ui-monospace, Menlo, monospace; color: var(--fg); }
 .md a.anchor, .md .octicon { display: none; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--muted); vertical-align: 1px; }
+.dot.up { background: var(--ok); }
+.dot.down { background: var(--bad); }
+.badge.quiet { background: var(--line); color: var(--muted); }

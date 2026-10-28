@@ -1,0 +1,12 @@
+@@
+cpu  24191 803 7624 691872 1428 0 185 0 0 0
+@@
+Mem:     15990259712   922456064  9399128064     1867776  6022860800 15067803648
+@@
+/dev/mapper/ubuntu--vg-ubuntu--lv 247677284352 20794863616 214226530304       9% /
+@@
+12
+@@
+0.99 0.67 0.33 2/341 19865
+@@
+{"Command":"\"sleep infinity\"","CreatedAt":"2026-10-28 10:32:22 +0100 CET","HealthStatus":"none","ID":"14547bdd2f3f","Image":"qcc-lab","Labels":"","LocalVolumes":"0","Mounts":"/home/user…","Names":"qcc-lab","Networks":"bridge","Platform":{"architecture":"amd64","os":"linux"},"Ports":"","RunningFor":"About a minute ago","Size":"1.51MB (virtual 1.38GB)","State":"running","Status":"Up About a minute"}

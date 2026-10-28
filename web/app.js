@@ -83,13 +83,14 @@ function procTable(procs) {
 }
 
 function viewDevices(el) {
-  el.innerHTML = `<h2>Devices</h2><div id="mac"></div><div id="boxes" class="cards"></div>`;
+  el.innerHTML = `<h2>Devices</h2><div id="mac"></div><div id="boxes" class="cards"></div><div id="servers" class="cards"></div>`;
+  serverCards($("#servers"));
   const shown = new Set();
   onRuns(() => {
     for (const r of liveVast()) if (!shown.has(r.id)) {
       shown.add(r.id);
       const d = document.createElement("div"); $("#boxes").append(d);
-      boxStream(d, r.meta.id, `<a href="#/run/${r.id}">Vast ${r.meta.id}</a> <span class="muted">${esc(r.device)} · ${money(r.dph)}/h</span>`);
+      boxStream(d, `box:${r.meta.id}`, `<a href="#/run/${r.id}">Vast ${r.meta.id}</a> <span class="muted">${esc(r.device)} · ${money(r.dph)}/h</span>`);
     }
   });
   subHist("local", 90, hist => { $("#mac").innerHTML = macCard(hist); });
@@ -112,12 +113,12 @@ const filt = JSON.parse(localStorage.getItem("mc.filter") || "{}");
 function runsTable(rs) {
   return `<table class="grid"><thead><tr><th>Status</th><th>Run</th><th>Source</th><th>Project</th><th>Device</th><th>Started</th><th>Duration</th><th>Cost</th></tr></thead><tbody>
   ${rs.map(r => `<tr class="${r.source === "vast" && r.status === "running" ? "burning" : ""}"><td>${badge(r.status)}</td><td><a href="#/run/${encodeURIComponent(r.id)}">${esc(r.name)}</a></td><td>${esc(r.source)}</td><td>${esc(r.project || "")}</td>
-  <td>${esc(r.device || "")}${r.source === "vast" && r.status === "running" && r.meta.gpu_util != null ? ` <span class="${gpuIdle(r) ? "idle" : "muted"}">GPU ${pct(r.meta.gpu_util)}</span>` : ""}</td><td>${fmtT(r.started)}</td><td>${dur(r)}</td><td>${r.cost != null ? money(r.cost) + (r.dph ? ` <span class="muted">@${money(r.dph)}/h</span>` : "") : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No runs.</td></tr>`}</tbody></table>`;
+  <td>${esc(r.device || "")}${r.source === "vast" && r.status === "running" && r.meta.gpu_util != null ? ` <span class="${gpuIdle(r) ? "idle" : "muted"}">GPU ${pct(r.meta.gpu_util)}</span>` : ""}</td><td>${fmtT(r.started)}</td><td>${dur(r)}</td><td>${r.cost != null ? money(r.cost) + (r.dph ? ` <span class="muted">@${money(r.dph)}/h</span>` : "") : r.source === "server" && !r.dph ? `<span class="muted">own hardware</span>` : ""}</td></tr>`).join("") || `<tr><td colspan="8" class="muted">No runs.</td></tr>`}</tbody></table>`;
 }
 
 function viewRuns(el) {
   el.innerHTML = `<h2>Runs</h2><div class="toolbar">
-    <select id="fsrc"><option value="">all sources</option><option>local</option><option>vast</option><option>kaggle</option></select>
+    <select id="fsrc"><option value="">all sources</option><option>local</option><option>vast</option><option>kaggle</option><option>server</option></select>
     <select id="fproj"><option value="">all projects</option></select></div><div id="runs" class="muted">loading…</div>`;
   let rs = [];
   const draw = () => {
@@ -162,8 +163,11 @@ function viewRun(el, id) {
     $("#rhead").innerHTML = `<h2>${esc(r.name)} ${badge(r.status)} <span class="muted">${esc(r.source)}${r.project ? " · " + esc(r.project) : ""}</span></h2>
       <table class="kv"><tr><td>Started</td><td>${fmtT(r.started)}</td><td>Duration</td><td>${dur(r)}</td></tr>
       ${r.cmd ? `<tr><td>Command</td><td colspan="3"><code>${esc(r.cmd)}</code></td></tr>` : ""}
-      ${r.pid ? `<tr><td>PID</td><td>${r.pid}</td><td>Exit</td><td>${r.exit_code ?? "–"}</td></tr>` : ""}</table>`;
+      ${r.pid ? `<tr><td>PID</td><td>${r.pid}</td><td>Exit</td><td>${r.exit_code ?? "–"}</td></tr>` : ""}
+      ${r.source === "server" ? `<tr><td>Server</td><td>${esc(r.device)}</td><td>Log</td><td><code>${esc(r.meta.path)}</code></td></tr>` : ""}</table>
+      ${r.source === "server" && !r.meta.launched ? `<p class="muted small">Found on the server, not started by mc: <b>running</b> means the log was written in the last 5 min (last write ${ago(r.meta.mtime)}). There's no pid to stop; do that on the server.</p>` : ""}`;
     $("#rhead").append(actionButtons(r));
+    if (r.source === "server" && !logStarted) boxStream($("#rbox"), `srv:${r.meta.server}`, `Live metrics · ${esc(r.meta.server)}`);
     if (!logStarted) { logStarted = true; logViewer($("#rlog"), `/api/runs/${encodeURIComponent(id)}/log`); }
   };
   onRuns(d => { rs = d.runs; head(); });
@@ -180,6 +184,7 @@ async function act(r, action, warning) {
 function actionButtons(r) {
   const b = [];
   if (r.source === "local" && r.status === "running") b.push(["kill", `Sends SIGTERM to pid ${r.pid}. The job stops, and mc records the exit.`]);
+  if (r.source === "server" && r.meta.launched && r.status === "running") b.push(["kill", `Sends SIGTERM to process group ${r.pid} on ${r.meta.server}${r.meta.container ? ` (container ${r.meta.container})` : ""}. The server and its files are untouched.`]);
   if (r.source === "vast" && r.status === "running") b.push(["stop", "GPU billing stops; storage keeps billing and the disk is kept. You can start it again later, but its GPU may be rented out by then."]);
   if (r.source === "vast" && r.status !== "destroyed") b.push(["destroy", "Deletes the instance AND its disk. Anything not copied off the box (e.g. /root/store) is gone. Billing ends."]);
   const el = document.createElement("div"); el.className = "actions";
@@ -231,7 +236,7 @@ function vastHead(r, first) {
   $("#rhead").append(actionButtons(r));
   if (!first) return;
   if (!running) { $("#rlog").innerHTML = `<p class="muted">Not running: logs and live metrics need a running box (ssh).</p>`; return; }
-  boxStream($("#rbox"), iid, "Live box metrics");
+  boxStream($("#rbox"), `box:${iid}`, "Live box metrics");
   fetch(`/api/runs/${encodeURIComponent(r.id)}/logs`).then(x => x.ok ? x.json() : x.json().then(e => Promise.reject(e.detail))).then(logs => {
     // every *.log/*.out/*.err found on the box, newest first; the path box takes any other file
     $("#rpick").innerHTML = `<label>Log <select id="lname">${logs.map(l => `<option value="${esc(l.path)}">${esc(l.path)} · ${ago(l.mtime)} · ${fmtB(l.size)}</option>`).join("")}</select></label>
@@ -245,12 +250,12 @@ function vastHead(r, first) {
   }).catch(e => { $("#rlog").innerHTML = `<p class="bad">Can't list logs: ${esc(e)}</p>`; });
 }
 
-function boxCard(hist, title) {
+function boxCard(hist, title, extra = "") {
   const ok = hist.filter(x => !x.error), s = ok[ok.length - 1], last = hist[hist.length - 1];
-  const err = last?.error ? `<p class="bad small">ssh: ${esc(last.error)}</p>` : "";
-  if (!s) return `<div class="card"><h3>${title}</h3>${err || `<p class="muted">connecting over ssh…</p>`}</div>`;
-  const idle = ok.length >= 6 && ok.slice(-6).every(x => x.gpus.every(g => (g.util ?? 0) < 5));
-  return `<div class="card ${idle ? "idlecard" : ""}"><h3>${title} ${idle ? `<span class="idle">GPU 0% for 30 s+</span>` : ""}</h3>${err}
+  const err = last?.error ? `<p class="bad small">ssh: ${esc(last.error)}</p>${last.hint ? `<p class="small">The server doesn't accept your key. Install it once (asks for the server password in your terminal, not here):<br><code>${esc(last.hint)}</code><br><span class="muted">No key yet? <code>ssh-keygen -t ed25519</code> first.</span></p>` : ""}` : "";
+  if (!s) return `<div class="card"><h3>${title}</h3>${err || `<p class="muted">connecting over ssh…</p>`}${extra}</div>`;
+  const idle = ok.length >= 6 && ok.slice(-6).every(x => x.gpus.length && x.gpus.every(g => (g.util ?? 0) < 5));  // no GPU = not idle
+  return `<div class="card ${idle ? "idlecard" : ""}"><h3>${title} ${idle ? `<span class="idle">GPU 0% for 30 s+</span>` : ""}${s.load ? ` <span class="muted">load ${s.load.map(l => l.toFixed(1)).join(" ")}</span>` : ""}</h3>${err}
   ${s.gpus.map(g => `<div class="metrics">
     <div><label>GPU${g.index} util ${pct(g.util)} <span class="muted">${esc(g.name.replace("NVIDIA GeForce ", ""))}</span></label>${spark(ok.map(x => x.gpus[g.index]?.util ?? 0))}</div>
     <div><label>VRAM ${fmtB(g.mem_used * 2 ** 20)}/${fmtB(g.mem_total * 2 ** 20)}</label>${spark(ok.map(x => { const q = x.gpus[g.index]; return q ? 100 * q.mem_used / q.mem_total : 0; }))}</div>
@@ -259,12 +264,35 @@ function boxCard(hist, title) {
   <div class="metrics">
     <div><label>CPU ${pct(s.cpu)} <span class="muted">${s.nproc} cores</span></label>${spark(ok.filter(x => x.cpu != null).map(x => x.cpu))}</div>
     <div><label>RAM ${fmtB(s.mem.used)}/${fmtB(s.mem.total)}</label>${spark(ok.map(x => 100 * x.mem.used / x.mem.total))}</div>
-    <div><label>Disk ${fmtB(s.disk.used)}/${fmtB(s.disk.total)}</label>${bar(100 * s.disk.used / s.disk.total)}</div></div></div>`;
+    <div><label>Disk ${fmtB(s.disk.used)}/${fmtB(s.disk.total)}</label>${bar(100 * s.disk.used / s.disk.total)}</div></div>
+  ${s.containers ? `<p class="small">${s.containers.length ? "Containers: " + s.containers.map(c => `<code>${esc(c.name)}</code> <span class="muted">${esc(c.image)} · ${esc(c.status)}</span>`).join(", ") : `<span class="muted">No running containers (or no docker access).</span>`}</p>` : ""}${extra}</div>`;
 }
 
-function boxStream(el, iid, title) {
+function boxStream(el, topic, title) {  // topic: box:<vast id> or srv:<server id>
   el.innerHTML = boxCard([], title);
-  subHist(`box:${iid}`, 60, hist => { el.innerHTML = boxCard(hist, title); });
+  subHist(topic, 60, hist => { el.innerHTML = boxCard(hist, title); });
+}
+
+// ---------- Home servers (projects.yaml `servers:`) ----------
+const srvRuns = id => (RUNS?.runs || []).filter(r => r.source === "server" && r.meta.server === id);
+function serverCards(el) {
+  fetch("/api/servers").then(r => r.json()).then(ss => {
+    if (!ss.length) return;
+    el.insertAdjacentHTML("beforebegin", `<h3 class="gap">Servers <span class="muted small">your own machines, over ssh · polled every 60 s, every 5 s while shown</span></h3>`);
+    for (const s of ss) {
+      const d = document.createElement("div"); el.append(d);
+      let hist = [];
+      const draw = () => {
+        const last = hist[hist.length - 1], st = !last ? "" : last.error ? "down" : "up";
+        const rs = srvRuns(s.id).filter(r => r.status !== "quiet" || r.meta.launched).slice(0, 8);
+        const title = `<span class="dot ${st}" title="${st || "not polled yet"}"></span>${esc(s.id)} <span class="muted">${esc(s.user ? s.user + "@" : "")}${esc(s.host)}${s.owner ? " · " + esc(s.owner) : ""} · ${s.cost_per_hour ? money(s.cost_per_hour) + "/h" : "own hardware"}${s.allow_launch ? " · launch on" : " · read-only"}</span>`;
+        d.innerHTML = boxCard(hist, title, `<ul class="items small">${rs.map(r => `<li>${badge(r.status)} <a href="#/run/${encodeURIComponent(r.id)}">${esc(r.name)}</a> <span class="muted">${esc(r.device)}${r.project ? " · " + esc(r.project) : ""} · ${r.meta.launched ? "started " + ago(r.started) : "written " + ago(r.meta.mtime)}</span></li>`).join("") || `<li class="muted">No jobs: no *.log/*.out/*.err written in the last 5 min, and nothing started with mc run --on.</li>`}</ul>
+          <p class="muted small"><a href="#/runs" onclick="filt.src = 'server'; filt.proj = ''">All server logs →</a></p>`);
+      };
+      sub(`srv:${s.id}`, (items, reset) => { if (reset) hist = []; hist.push(...items); hist = hist.slice(-60); draw(); });
+      onRuns(draw);
+    }
+  });
 }
 
 // ---------- Projects ----------
@@ -407,7 +435,7 @@ function viewOverview(el) {
       <p class="muted small">Billing runs while the box exists, GPU busy or not. Stop/destroy stays manual for now.</p></div>`
       : `<div class="card"><h3>No Vast boxes running <span class="muted">· $0/h</span></h3></div>`;
     const live = rs.filter(r => LIVE.includes(r.status) && r.source !== "vast");
-    $("#ovlive").innerHTML = live.length ? runsTable(live) : `<p class="muted">Nothing running locally or on Kaggle.</p>`;
+    $("#ovlive").innerHTML = live.length ? runsTable(live) : `<p class="muted">Nothing running locally, on Kaggle or on your servers.</p>`;
     const fresh = rs.filter(r => r.ended && r.ended > since && !LIVE.includes(r.status)).sort((a, b) => b.ended - a.ended);
     $("#ovseen").textContent = `(since ${fmtT(since)})`;
     $("#ovnew").innerHTML = fresh.length ? runsTable(fresh) : `<p class="muted">Nothing new.</p>`;

@@ -54,7 +54,11 @@ def ssh_cmd(iid, remote):
 
 
 async def ssh_run(iid, remote, timeout=20):
-    p = await asyncio.create_subprocess_exec(*ssh_cmd(iid, remote), stdin=asyncio.subprocess.DEVNULL,
+    return await run(ssh_cmd(iid, remote), timeout)
+
+
+async def run(argv, timeout=20):
+    p = await asyncio.create_subprocess_exec(*argv, stdin=asyncio.subprocess.DEVNULL,
                                              stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         out, err = await asyncio.wait_for(p.communicate(), timeout)
@@ -99,11 +103,16 @@ def parse_box(text, prev_cpu=None):
             "disk": {"total": int(d[1]), "used": int(d[2])}}
 
 
-async def follow(iid, path, n=500):
-    """tail -F a remote file; reconnects every 10 s like vast/logs.sh. Yields lists of lines."""
+def follow(iid, path, n=500):
+    return tail(lambda n: ssh_cmd(iid, f"tail -n {int(n)} -F {shlex.quote(path)}"), n)
+
+
+async def tail(argv, n=500):
+    """argv(n): an ssh command that tails -F a remote file from n lines back. Reconnects every 10 s like
+    vast/logs.sh. Yields lists of lines."""
     while True:
         p = await asyncio.create_subprocess_exec(
-            *ssh_cmd(iid, f"tail -n {int(n)} -F {shlex.quote(path)}"), stdin=asyncio.subprocess.DEVNULL,
+            *argv(n), stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         rest, prev = b"", b"\n"
         try:
@@ -123,10 +132,13 @@ async def follow(iid, path, n=500):
 
 # Any log on the box, not just /root/queue.log: *.log/*.out/*.err under /root and /workspace (skipping dot-dirs,
 # venvs, site-packages), plus Vast's own onstart log. Newest first, so the live one is on top.
-FIND_LOGS = (r"find /root /workspace /var/log/onstart.log -maxdepth 5 \( -type d \( -name '.*' -o -name site-packages"
-             r" -o -name node_modules -o -name __pycache__ -o -name wandb \) -prune \) -o -type f"
-             r" \( -name '*.log' -o -name '*.out' -o -name '*.err' \) -size +0 -printf '%T@\t%s\t%p\n' 2>/dev/null"
-             r" | sort -rn | head -60; true")
+def find_logs(roots, more=""):
+    return (rf"find {roots} -maxdepth 5 \( -type d \( -name '.*' -o -name site-packages"
+            r" -o -name node_modules -o -name __pycache__ -o -name wandb \) -prune \) -o -type f"
+            rf" \( -name '*.log' -o -name '*.out' -o -name '*.err' \) -size +0 {more}-printf '%T@\t%s\t%p\n' 2>/dev/null")
+
+
+FIND_LOGS = find_logs("/root /workspace /var/log/onstart.log") + " | sort -rn | head -60; true"
 LOG_PATH = re.compile(r"^/[^\x00-\x1f]+$")  # any absolute path; shlex.quote makes it shell-safe
 
 

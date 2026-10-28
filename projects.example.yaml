@@ -10,3 +10,18 @@ projects:
     roadmap: docs/ROADMAP.md                  # optional, ## Done / ## Now / ## Planned / ## Ideas
     kaggle_user: your-kaggle-username         # optional
     kernel_prefix: myproj-                    # Kaggle kernels whose slug starts with this belong here
+
+# Optional: your own always-on machines (LAN box, workstation, NAS). Polled over ssh like a Vast box:
+# status, CPU/RAM/disk/GPU, docker containers, and every *.log/*.out/*.err under `roots` (+ each container's /root).
+# Key auth via your ssh agent only; if the key is missing the card shows the exact ssh-copy-id command.
+servers:
+  - id: homelab                      # used in `mc run --on homelab`
+    host: 192.168.1.20               # or an alias from ~/.ssh/config
+    user: me                         # optional (ssh config / your login name otherwise)
+    port: 22                         # optional
+    # jump: bastion.example.com      # optional ProxyJump
+    # container: myproj-lab          # optional default for `mc run --on homelab` (--container overrides)
+    owner: me
+    cost_per_hour: 0                 # 0 = "own hardware", kept out of the burn pill
+    roots: ["~", /root]              # where logs are looked for, and the first one is where `mc run --on` writes
+    allow_launch: false              # read-only until true; then `mc run --on` may start jobs here

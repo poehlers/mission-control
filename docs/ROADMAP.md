@@ -13,6 +13,7 @@
 - [x] Manual run status and automatic `superseded` for old Kaggle versions (2026-10-14)
 - [x] Collapsible roadmap columns with show more / less (2026-10-14)
 - [x] Public release — portable paths, example config, CI (2026-10-18)
+- [x] Home servers — ssh health, docker containers, log discovery, `mc run --on` with allow_launch (2026-10-28)
 
 ## Now
 - [ ] Watch real use for a week — note anything that still needs a terminal

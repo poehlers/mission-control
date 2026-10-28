@@ -17,12 +17,13 @@ from fastapi.staticfiles import StaticFiles
 
 import db
 import roadmap
-from collectors import github, kaggle, local, vast
+from collectors import github, kaggle, local, servers, vast
 
 ROOT = Path(__file__).parent
 CONFIG = ROOT / "projects.yaml"  # copy projects.example.yaml; without it only auto-discovered repos show
-PROJECTS = {p["id"]: {**p, "path": os.path.expanduser(p["path"])}
-            for p in (yaml.safe_load(CONFIG.read_text()) if CONFIG.exists() else {}).get("projects") or []}
+CFG = (yaml.safe_load(CONFIG.read_text()) if CONFIG.exists() else None) or {}
+PROJECTS = {p["id"]: {**p, "path": os.path.expanduser(p["path"])} for p in CFG.get("projects") or []}
+SERVERS = servers.load(CFG)  # your own machines, polled over ssh like Vast boxes
 # ponytail: local repos are discovered once at startup; a new clone shows up after a restart.
 PROJECTS.update(github.discover(PROJECTS))
 sources = {}  # per-source poll health, shown in the UI: {"vast": {"ok": bool, "error": str|None, "t": epoch}}
@@ -200,6 +201,64 @@ async def box_loop():
         await asyncio.sleep(5)
 
 
+srv_hist = defaultdict(lambda: deque(maxlen=60))  # per server: 5 s samples while watched, else 60 s
+srv_full = {}  # server id -> time of the last log discovery
+
+
+async def server_poll(sid, full):
+    s, h = SERVERS[sid], srv_hist[sid]
+    prev = h[-1].get("cpu_raw") if h else None
+    try:
+        x = servers.parse_metrics(await servers.run(s, servers.METRICS), prev)
+        if full:
+            srv_full[sid] = time.time()
+            server_runs(s, await servers.run(s, servers.discover_script(s, launched(sid)), 40))
+    except Exception as e:  # down, no key, or a timeout: show it on the card, keep the last known rows
+        x = {"error": str(e)[:300], "hint": servers.hint(s, str(e)), "cpu_raw": prev}
+    x["t"] = time.time()
+    h.append(x)
+    hub.publish(f"srv:{sid}", x)
+
+
+def launched(sid):
+    return [r for r in db.runs(con) if r["source"] == "server" and r["meta"].get("server") == sid
+            and r["meta"].get("launched") and r["status"] == "running"]
+
+
+def server_runs(s, out):
+    """Found logs -> one row each (stale ones deleted, they're derived); launched runs settled from their log."""
+    found, states = servers.parse_discover(out)
+    now = time.time()
+    rows = {r["id"]: r for r in db.runs(con) if r["source"] == "server" and r["meta"].get("server") == s["id"]}
+    mine = {(r["meta"].get("container"), r["meta"]["path"]) for r in rows.values() if r["meta"].get("launched")}
+    seen = set()
+    for log in found:
+        if (log["container"], log["path"]) in mine:
+            continue
+        if len(seen) >= 30:  # ponytail: newest 30 per server; older logs are reachable over ssh, not here
+            break
+        row = servers.found_row(s, log, now, PROJECTS)
+        seen.add(row["id"])
+        if "manual" not in rows.get(row["id"], {}).get("meta", {}):
+            db.upsert(con, **row)
+    for rid, r in rows.items():
+        if not r["meta"].get("launched") and rid not in seen:
+            con.execute("delete from runs where id=?", (rid,))
+    for rid, state in states.items():
+        if rid in rows and (upd := servers.settle(rows[rid], state, now)):
+            db.upsert(con, **upd)
+
+
+async def servers_loop():
+    """Every server once a minute (metrics + log discovery); metrics every 5 s while a page shows the server."""
+    while True:
+        now = time.time()
+        due = {sid: now - srv_full.get(sid, 0) >= 60 for sid in SERVERS}
+        await asyncio.gather(*(server_poll(sid, full) for sid, full in due.items()
+                               if full or hub.watched(f"srv:{sid}")))
+        await asyncio.sleep(5)
+
+
 def has_creds(env, files):
     """A cloud poller only starts when its CLI is configured; otherwise it would just show as failing."""
     return any(os.environ.get(e) for e in env) or any(Path(f).expanduser().exists() for f in files)
@@ -207,7 +266,7 @@ def has_creds(env, files):
 
 @asynccontextmanager
 async def lifespan(app):
-    loops = [local_loop, runs_loop]
+    loops = [local_loop, runs_loop] + ([servers_loop] if SERVERS else [])
     if has_creds(["VAST_API_KEY"], ["~/.config/vastai/vast_api_key", "~/.vast_api_key"]):
         loops += [vast_loop, box_loop]
     kdir = os.environ.get("KAGGLE_CONFIG_DIR", "~/.kaggle")
@@ -233,11 +292,13 @@ def topic_history(topic):
         return [runs_payload()]
     if topic == "local":
         return list(local_hist)
+    if topic.startswith("srv:"):
+        return list(srv_hist.get(topic[4:], ()))
     iid = int(topic.removeprefix("box:"))
     return list(box_hist[iid]) if iid in box_hist else []
 
 
-TOPIC = re.compile(r"^(runs|local|box:\d+)$")
+TOPIC = re.compile(r"^(runs|local|box:\d+|srv:[\w.-]+)$")
 
 
 @app.get("/api/stream")
@@ -246,7 +307,7 @@ async def stream(t: list[str] = Query([])):
     Messages: {"topic", "items", "reset"}; reset=True carries the topic's history and replaces what the page had."""
     topics = sorted(set(t))
     if not topics or not all(TOPIC.match(x) for x in topics):
-        raise HTTPException(400, "topics: runs, local, box:<id>")
+        raise HTTPException(400, "topics: runs, local, box:<id>, srv:<id>")
 
     async def gen():
         q = asyncio.Queue()
@@ -281,6 +342,20 @@ def vast_iid(r):
     return iid
 
 
+@app.get("/api/servers")
+async def servers_json():
+    """Registry for the Servers panel. Just names and addresses; keys never leave the ssh agent."""
+    return [{k: s[k] for k in ("id", "host", "user", "port", "jump", "container", "owner", "cost_per_hour",
+                               "allow_launch")} for s in SERVERS.values()]
+
+
+def server_of(r):
+    m = json.loads(r["meta"])
+    if m.get("server") not in SERVERS:
+        raise HTTPException(409, f"server {m.get('server')} is no longer in projects.yaml")
+    return SERVERS[m["server"]], m
+
+
 @app.get("/api/runs/{run_id}/logs")
 async def run_logs(run_id: str):
     """Logs a run offers. Vast: every log file found on the box (vast.FIND_LOGS), newest first."""
@@ -305,6 +380,13 @@ async def run_log(run_id: str, name: str = "output", n: int = 500):
 
         async def lines():
             async for ls in vast.follow(iid, name, n):
+                yield clean(ls)
+        return sse_iter(lines())
+    if r["source"] == "server":  # the run IS one log file on the server; its path comes from the poller, not the URL
+        s, m = server_of(r)
+
+        async def lines():
+            async for ls in servers.follow(s, m.get("container"), m["path"], n):
                 yield clean(ls)
         return sse_iter(lines())
     if r["source"] == "kaggle" and not (r["log"] and Path(r["log"]).exists()):
@@ -342,7 +424,7 @@ async def set_status(run_id: str, status: str, x_mc_confirm: str = Header("")):
 
 
 # ---------- Lifecycle actions: each needs the exact action echoed back from the page's confirm dialog ----------
-ACTIONS = {"local": {"kill"}, "vast": {"stop", "destroy"}}
+ACTIONS = {"local": {"kill"}, "vast": {"stop", "destroy"}, "server": {"kill"}}  # home servers: never destroyed
 
 
 @app.post("/api/runs/{run_id}/{action}")
@@ -371,6 +453,16 @@ async def run_action(run_id: str, action: str, x_mc_confirm: str = Header("")):
         except psutil.NoSuchProcess:
             raise HTTPException(409, "process already gone")
         return {"ok": True, "detail": f"SIGTERM sent to pid {r['pid']} and {len(tree) - 1} child process(es)"}
+    if r["source"] == "server":
+        s, m = server_of(r)
+        if not (m.get("launched") and r["status"] == "running"):
+            raise HTTPException(409, "only a running job started with `mc run --on` has a pid to signal")
+        try:
+            await servers.run(s, servers.kill_script(r["pid"], m))
+        except RuntimeError as e:
+            raise HTTPException(409, f"{s['id']}: {e}")
+        db.upsert(con, id=run_id, meta={**m, "kill_t": time.time()})
+        return {"ok": True, "detail": f"SIGTERM sent to process group {r['pid']} on {s['id']}"}
     iid = int(run_id.removeprefix("vast-"))
     from vastai.sdk import VastAI
     try:
